@@ -595,7 +595,7 @@ resource "aws_lb_listener_rule" "api_routing" {
   condition {
     path_pattern {
       # Matches exactly "/books" and anything under it like "/books/123"
-      values = ["/${each.key}", "/${each.key}/*"] 
+      values = ["/${each.key}", "/${each.key}/*", "/${each.key}*"] 
     }
   }
 }
