@@ -103,5 +103,5 @@ jobs:
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.task-def.outputs.task-definition }}
-          service: ${{ matrix.service }}-service
+          service: ${{ matrix.service }}-service-${{ vars.ENV_VAR }}
           cluster: ${{ env.ECS_CLUSTER }}
