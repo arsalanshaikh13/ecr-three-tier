@@ -647,8 +647,8 @@ resource "aws_ecs_task_definition" "app_task" {
     APP_MEMORY       = var.app_memory
     # Initial bootstrap env; CI/CD will handle the real ones later
     ENVIRONMENT_VARS = each.key == "dashboard" ? jsonencode([
-      { name = "BOOKS_API_URL", value = "http://books.${var.domain_name}" },
-      { name = "AUTHORS_API_URL", value = "http://authors.${var.domain_name}" }
+      { name = "BOOKS_SERVICE_URL", value = "https://books.${var.domain_name}" },
+      { name = "AUTHORS_SERVICE_URL", value = "https://authors.${var.domain_name}" }
     ]) : "[]"
   })
 }

@@ -40,7 +40,7 @@ jobs:
             env: "[]"
           - service: "dashboard"
             port: 3200
-            env: '[{"name": "BOOKS_API_URL", "value": "http://books.${{ vars.DOMAIN_NAME }}"}, {"name": "AUTHORS_API_URL", "value": "http://authors.${{ vars.DOMAIN_NAME }}"}]'
+            env: '[{"name": "BOOKS_SERVICE_URL", "value": "https://books.${{ vars.DOMAIN_NAME }}"}, {"name": "AUTHORS_SERVICE_URL", "value": "https://authors.${{ vars.DOMAIN_NAME }}"}]'
 
     steps:
       - name: Checkout repository
@@ -105,3 +105,4 @@ jobs:
           task-definition: ${{ steps.task-def.outputs.task-definition }}
           service: ${{ matrix.service }}-service-${{ vars.ENV_VAR }}
           cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
