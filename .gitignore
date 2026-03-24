@@ -4,3 +4,4 @@
 .terraform.*
 terraform.*
 task-definition.json
+host-based/**
