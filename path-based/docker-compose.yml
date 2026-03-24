@@ -1,0 +1,30 @@
+services:
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+      platforms:
+        - "linux/amd64"
+    image: "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${DASHBOARD_REPO}:${TAG}"
+    ports:
+      - "3200:3200"
+
+  books:
+    build:
+      context: ./books
+      dockerfile: Dockerfile
+      platforms:
+        - "linux/amd64"
+    image: "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${BOOKS_REPO}:${TAG}"
+    ports:
+      - "3400:3400"
+
+  authors:
+    build:
+      context: ./authors
+      dockerfile: Dockerfile
+      platforms:
+        - "linux/amd64"
+    image: "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${AUTHORS_REPO}:${TAG}"
+    ports:
+      - "3300:3300"

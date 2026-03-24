@@ -6,7 +6,7 @@ on:
       - main
       - fargate
     paths:
-      - "host-based/**"
+      - "path-based/**"
       - ".github/workflows/**" # Triggers if you update this pipeline file
   workflow_dispatch: # Allows you to trigger deployments/secret rotations manually via the GitHub UI
 
@@ -66,7 +66,7 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
           REPO_NAME: ${{ matrix.service }}-repo-${{vars.ENV_VAR}}
         run: |
-          cd host-based
+          cd path-based
           # Assumes Dockerfiles are in folders named 'authors', 'books', 'dashboard'
           docker build -t $ECR_REGISTRY/$REPO_NAME:$IMAGE_TAG ./${{ matrix.service }}
           docker push $ECR_REGISTRY/$REPO_NAME:$IMAGE_TAG

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard App</title>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <link rel="stylesheet" href="/style.css" />
+</head>
+
+<body>
+  <h1 class="title">⚡ ECS - Advanced ALB Routing</h1>
+  <h2 class="sub-title">Dashboard</h2>
+
+  <div class="container">
+    <table id="dashboardTable">
+      <thead>
+        <tr>
+          <th>Book Title</th>
+          <th>Author</th>
+          <th>Published Date</th>
+          <th>Pages</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="dashboardTableBody"></tbody>
+    </table>
+
+    <div id="loading">Loading...</div>
+
+    <div id="errorUI">
+      Error loading data. Please try again later.
+    </div>
+  </div>
+
+  <div id="drawer" class="drawer">
+    <div class="drawer-header">
+      <button class="close-icon">&times;</button>
+    </div>
+    <div class="drawer-body"></div>
+    <div class="drawer-footer">
+      <button id="closeDrawer">Close</button>
+    </div>
+  </div>
+
+  <script>
+    async function fetchData() {
+      try {
+        // Fetch config from server
+        const configRes = await fetch('/config');
+        const config = await configRes.json();
+
+        const { BOOKS_SERVICE_URL, AUTHORS_SERVICE_URL } = config;
+
+        const loadingDiv = document.getElementById("loading");
+        loadingDiv.style.display = "block";
+
+        const booksRes = await fetch(`${BOOKS_SERVICE_URL}/api`);
+        const authorsRes = await fetch(`${AUTHORS_SERVICE_URL}/api`);
+        const { books } = await booksRes.json();
+        const { authors } = await authorsRes.json();
+
+        loadingDiv.style.display = "none";
+
+        // Create a map of authors for quick lookup
+        const authorsMap = new Map();
+        authors.forEach(author => {
+          authorsMap.set(author.id, author);
+        });
+
+        const tbody = document.getElementById("dashboardTableBody");
+
+        books.forEach(book => {
+          const author = authorsMap.get(book.authorId);
+
+          const row = document.createElement("tr");
+
+          const titleCell = document.createElement("td");
+          titleCell.textContent = book.title;
+
+          const authorCell = document.createElement("td");
+          authorCell.textContent = author ? author.name : 'Unknown';
+
+          const publishedDateCell = document.createElement("td");
+          publishedDateCell.textContent = book.publishedDate;
+
+          const pagesCell = document.createElement("td");
+          pagesCell.textContent = book.pages;
+
+          const actionsCell = document.createElement("td");
+          const actionButton = document.createElement("button");
+          actionButton.textContent = 'View';
+          actionButton.classList.add('action-button');
+
+          actionButton.addEventListener('click', () => {
+            const drawer = document.getElementById('drawer');
+            const drawerContent = document.querySelector('.drawer-body');
+
+            drawerContent.innerHTML = `
+              <h2>📘 ${book.title}</h2>
+              <p><strong>Author:</strong> ${author ? author.name : 'Unknown'}</p>
+              <p><strong>Published Date:</strong> ${book.publishedDate}</p>
+              <p><strong>Pages:</strong> ${book.pages}</p>
+              <p><strong>Book Description:</strong> ${book.description}</p>
+              <p><strong>Author Bio:</strong> ${author ? author.bio : 'N/A'}</p>
+              <p><strong>Author Birthday:</strong> ${author ? author.birthDate : 'N/A'}</p>
+            `;
+            drawer.classList.toggle('open');
+          });
+
+          actionsCell.appendChild(actionButton);
+
+          row.appendChild(titleCell);
+          row.appendChild(authorCell);
+          row.appendChild(publishedDateCell);
+          row.appendChild(pagesCell);
+          row.appendChild(actionsCell);
+          tbody.appendChild(row);
+        });
+
+        document.getElementById("dashboardTable").style.display = "table";
+        document.getElementById("errorUI").style.display = "none";
+      } catch (err) {
+        console.error("Error fetching data:", err);
+        document.getElementById("loading").style.display = "none";
+        document.getElementById("dashboardTable").style.display = "none";
+        document.getElementById("errorUI").style.display = "block";
+      }
+    }
+
+    window.onload = fetchData;
+
+    document.querySelector('.close-icon').addEventListener('click', () => {
+      document.getElementById('drawer').classList.remove('open');
+    });
+
+    document.getElementById('closeDrawer').addEventListener('click', () => {
+      document.getElementById('drawer').classList.remove('open');
+    });
+  </script>
+
+</body>
+
+</html>
