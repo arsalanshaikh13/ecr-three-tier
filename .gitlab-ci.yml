@@ -1,0 +1,157 @@
+stages:
+  - build
+  - prepare
+  - deploy
+
+# ---------------------------------------------------------
+# PIPELINE TRIGGER RULES
+# ---------------------------------------------------------
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web"' # Manual trigger
+    - if: '$CI_COMMIT_BRANCH == "gitlab-lirw"'
+      changes:
+        - "host-based/**/*"
+        - ".gitlab-ci.yml"
+
+variables:
+  AWS_REGION: "us-east-1"
+  ECS_CLUSTER: "ecs-cluster-dev"
+  SKIP_BUILD:
+    value: "false"
+    description: "Set to 'true' to skip Docker Build & Push"
+
+# ---------------------------------------------------------
+# GLOBAL CONFIGURATION
+# ---------------------------------------------------------
+default:
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: https://gitlab.com
+
+# ---------------------------------------------------------
+# HIDDEN HELPERS (DRY Configurations)
+# ---------------------------------------------------------
+.aws_oidc_login:
+  script:
+    - >
+      export $(printf "AWS_ACCESS_KEY_ID=%s AWS_SECRET_ACCESS_KEY=%s AWS_SESSION_TOKEN=%s"
+      $(aws sts assume-role-with-web-identity
+      --role-arn arn:aws:iam::${ACCOUNT_ID}:role/GitLab-ECS-DeployRole
+      --role-session-name "GitLabRunner-${CI_PIPELINE_ID}"
+      --web-identity-token ${GITLAB_OIDC_TOKEN}
+      --duration-seconds 3600
+      --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]'
+      --output text))
+
+.service_matrix:
+  parallel:
+    matrix:
+      - SERVICE: "authors"
+      - SERVICE: "books"
+      - SERVICE: "dashboard"
+
+# ---------------------------------------------------------
+# STAGE 1: BUILD & PUSH
+# ---------------------------------------------------------
+build_image:
+  stage: build
+  extends: .service_matrix
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  before_script:
+    - apk add --no-cache aws-cli
+    - !reference [.aws_oidc_login, script]
+  script:
+    - ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+    - REPO_NAME="${SERVICE}-repo-${ENV_VAR}"
+
+    - |
+      if [ "$SKIP_BUILD" != "true" ]; then
+        echo "🏗️ Building Docker Image for $SERVICE..."
+        aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+        
+        IMAGE_TAG="${CI_COMMIT_SHA}"
+        cd host-based
+        docker build -t $ECR_REGISTRY/$REPO_NAME:$IMAGE_TAG ./${SERVICE}
+        docker push $ECR_REGISTRY/$REPO_NAME:$IMAGE_TAG
+        
+        FINAL_IMAGE="$ECR_REGISTRY/$REPO_NAME:$IMAGE_TAG"
+      else
+        echo "🔍 Fetching latest tag from ECR for $SERVICE..."
+        FETCHED_TAG=$(aws ecr describe-images --repository-name $REPO_NAME --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags[0]' --output text)
+        
+        if [ "$FETCHED_TAG" == "None" ] || [ -z "$FETCHED_TAG" ]; then exit 1; fi
+        
+        FINAL_IMAGE="$ECR_REGISTRY/$REPO_NAME:$FETCHED_TAG"
+      fi
+
+    # Save to a dynamically named .env file to prevent matrix overwrites
+    - echo "FINAL_IMAGE_URI=$FINAL_IMAGE" > build-${SERVICE}.env
+  artifacts:
+    reports:
+      dotenv: build-${SERVICE}.env
+
+# ---------------------------------------------------------
+# STAGE 2: PREPARE MANIFESTS
+# ---------------------------------------------------------
+prepare_manifest:
+  stage: prepare
+  extends: .service_matrix
+  image: alpine:latest
+  needs:
+    - job: build_image
+      artifacts: true
+  before_script:
+    # Only install what is needed to process JSON (jq)
+    - apk add --no-cache aws-cli jq
+    - !reference [.aws_oidc_login, script]
+  script:
+    - echo "Updating task definition for $SERVICE using image $FINAL_IMAGE_URI"
+
+    - aws ecs describe-task-definition --task-definition lirw-task-${SERVICE} --query taskDefinition > task-def.json
+    - jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' task-def.json > clean-task-def.json
+
+    - >
+      jq --arg IMAGE "$FINAL_IMAGE_URI" --arg CONTAINER "lirw-${SERVICE}" 
+      '(.containerDefinitions[] | select(.name == $CONTAINER)).image = $IMAGE' 
+      clean-task-def.json > ${SERVICE}-ready-task-def.json
+
+  artifacts:
+    paths:
+      - ${SERVICE}-ready-task-def.json
+    expire_in: 1 hour
+
+# ---------------------------------------------------------
+# STAGE 3: DEPLOY
+# ---------------------------------------------------------
+deploy_ecs:
+  stage: deploy
+  extends: .service_matrix
+  image: alpine:latest
+  environment:
+    name: devsandbox/${SERVICE}
+    url: https://${SERVICE}.${DOMAIN_NAME}
+  needs:
+    - job: prepare_manifest
+      artifacts: true
+  before_script:
+    # Only install AWS CLI for the final deployment commands
+    - apk add --no-cache aws-cli
+    - !reference [.aws_oidc_login, script]
+  script:
+    - echo "Registering new ECS task definition for $SERVICE..."
+    - >
+      REVISION_ARN=$(aws ecs register-task-definition 
+      --cli-input-json file://${SERVICE}-ready-task-def.json 
+      --query 'taskDefinition.taskDefinitionArn' --output text)
+
+    - echo "Created revision $REVISION_ARN"
+
+    - echo "Deploying to ECS cluster..."
+    - aws ecs update-service --cluster $ECS_CLUSTER --service ${SERVICE}-service-${ENV_VAR} --task-definition $REVISION_ARN > /dev/null
+
+    - echo "Waiting for service to stabilize..."
+    - aws ecs wait services-stable --cluster $ECS_CLUSTER --services ${SERVICE}-service-${ENV_VAR}
+    - echo "✅ Deployment Successful!"
