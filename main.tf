@@ -203,72 +203,6 @@ resource "aws_security_group" "alb_sg" {
 }
 
 
-# Task SG (For the individual containers running in awsvpc mode)
-resource "aws_security_group" "app_task_sg" {
-  name        = "lirw-task-sg-${local.env_suffix}"
-  description = "SG for ECS tasks"
-  vpc_id      = aws_vpc.vpc.id
-
-  # ingress {
-  #   description = "http port access"
-  #   from_port   = 80
-  #   to_port     = 80
-  #   protocol    = "tcp"
-  #   cidr_blocks = ["0.0.0.0/0"]
-  # }
-  # ingress {
-  #   description = "node port access"
-  #   from_port                = 3200
-  #   to_port                  = 3200
-  #   protocol                 = "tcp"
-  #   security_groups = [aws_security_group.alb_sg.id]
-  # }
-  # ingress {
-  #   description = "node port access"
-  #   from_port                = 32768
-  #   to_port                  = 65535
-  #   protocol                 = "tcp"
-  #   security_groups = [aws_security_group.alb_sg.id]
-  # }
-
-  # # Dynamically creates ingress rules for 3200, 3300, and 3400
-  dynamic "ingress" {
-    for_each = local.services
-    content {
-      description     = "Access for ${ingress.key} from ALB"
-      from_port       = ingress.value.port
-      to_port         = ingress.value.port
-      protocol        = "tcp"
-      # Only allow traffic that comes through the Load Balancer
-      security_groups = [aws_security_group.alb_sg.id] 
-    }
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-# resource "aws_security_group_rule" "allow_alb_to_tasks" {
-#   type                     = "ingress"
-#   from_port                = 3200
-#   to_port                  = 3200
-#   protocol                 = "tcp"
-#   security_group_id        = aws_security_group.app_task_sg.id
-#   source_security_group_id = aws_security_group.alb_sg.id
-# }
-# resource "aws_security_group_rule" "allow_alb_to_tasks" {
-#   type                     = "ingress"
-#   from_port                = 32768
-#   to_port                  = 65535
-#   protocol                 = "tcp"
-#   security_group_id        = aws_security_group.app_task_sg.id
-#   source_security_group_id = aws_security_group.alb_sg.id
-# }
-
 
 # NEW: Node SG (For the underlying EC2 instances to talk to AWS endpoints)
 resource "aws_security_group" "ecs_node_sg" {
@@ -733,12 +667,6 @@ resource "aws_ecs_service" "app_service" {
     weight            = 100
   }
 
-  # only needed for awsvpc network
-  # network_configuration {
-  #   subnets          = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id] 
-  #   security_groups  = [aws_security_group.app_task_sg.id]
-  #   assign_public_ip = false 
-  # }
 
   health_check_grace_period_seconds = 60
 
