@@ -586,8 +586,8 @@ resource "aws_ecs_task_definition" "app_task" {
   for_each         = local.services
   family                   = "lirw-task-${each.key}"
   # network_mode             = "awsvpc"
-  # network_mode             = "bridge"
-  network_mode             = "host"
+  network_mode             = "bridge"
+  # network_mode             = "host"
   requires_compatibilities = ["EC2"]
   cpu                      = var.app_cpu
   memory                   = var.app_memory

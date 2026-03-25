@@ -8,6 +8,12 @@ on:
       - "host-based/**"
       - ".github/workflows/**" # Triggers if you update this pipeline file
   workflow_dispatch: # Allows you to trigger deployments/secret rotations manually via the GitHub UI
+    inputs:
+      skip_build:
+        description: "Skip Docker Build & Push?"
+        type: boolean
+        required: true
+        default: true
 
 env:
   AWS_REGION: us-east-1
@@ -55,6 +61,7 @@ jobs:
 
       - name: Build and Push to ECR
         id: build-image
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.skip_build == true) }}
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
