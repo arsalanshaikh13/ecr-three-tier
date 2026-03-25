@@ -37,7 +37,7 @@ default:
     - >
       export $(printf "AWS_ACCESS_KEY_ID=%s AWS_SECRET_ACCESS_KEY=%s AWS_SESSION_TOKEN=%s"
       $(aws sts assume-role-with-web-identity
-      --role-arn arn:aws:iam::${ACCOUNT_ID}:role/GitLab-ECS-DeployRole
+      --role-arn arn:aws:iam::${ACCOUNT_ID}:role/GitLabActions-ECS-DeployRole
       --role-session-name "GitLabRunner-${CI_PIPELINE_ID}"
       --web-identity-token ${GITLAB_OIDC_TOKEN}
       --duration-seconds 3600
