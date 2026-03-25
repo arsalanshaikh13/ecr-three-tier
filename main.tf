@@ -225,24 +225,24 @@ resource "aws_security_group" "ecs_node_sg" {
   # }
 
 # Dynamically creates ingress rules for 3200, 3300, and 3400
-  dynamic "ingress" {
-    for_each = local.services
-    content {
-      description     = "Access for ${ingress.key} from ALB"
-      from_port       = ingress.value.port
-      to_port         = ingress.value.port
-      protocol        = "tcp"
-      # Only allow traffic that comes through the Load Balancer
-      security_groups = [aws_security_group.alb_sg.id] 
-    }
-  }
-  # ingress {
-  #   description = "node port access"
-  #   from_port                = 32768
-  #   to_port                  = 65535
-  #   protocol                 = "tcp"
-  #   security_groups = [aws_security_group.alb_sg.id]
+  # dynamic "ingress" {
+  #   for_each = local.services
+  #   content {
+  #     description     = "Access for ${ingress.key} from ALB"
+  #     from_port       = ingress.value.port
+  #     to_port         = ingress.value.port
+  #     protocol        = "tcp"
+  #     # Only allow traffic that comes through the Load Balancer
+  #     security_groups = [aws_security_group.alb_sg.id] 
+  #   }
   # }
+  ingress {
+    description = "node port access"
+    from_port                = 32768
+    to_port                  = 65535
+    protocol                 = "tcp"
+    security_groups = [aws_security_group.alb_sg.id]
+  }
 
   egress {
     from_port   = 0
