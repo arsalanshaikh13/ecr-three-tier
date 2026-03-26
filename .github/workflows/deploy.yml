@@ -9,6 +9,12 @@ on:
       - "rusinnextjs/**"
       - ".github/workflows/**"
   workflow_dispatch:
+    inputs:
+      skip_build:
+        description: "Skip Docker Build & Push?"
+        type: boolean
+        required: true
+        default: true
 
 env:
   AWS_REGION: us-east-1
@@ -62,6 +68,7 @@ jobs:
       # ---------------------------------------------------------
       - name: Build, tag, and push image to Amazon ECR
         id: build-image
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.skip_build == true) }}
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
@@ -79,6 +86,31 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Determine Image URI (Fetch from ECR)
+        id: determine-image
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.skip_build == true) }}
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPO_NAME: ${{ env.ECR_REPOSITORY }}
+        run: |
+          # 1. If the user left the input as 'latest', dynamically fetch the most recent tag from ECR
+          echo "🔍 Fetching the most recently pushed image tag from ECR for $REPO_NAME..."
+
+          # AWS CLI command to get the latest pushed image tag
+          FETCHED_TAG=$(aws ecr describe-images \
+            --repository-name $REPO_NAME \
+            --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags[0]' \
+            --output text)
+
+          # Safety check: ensure we actually found a tag
+          if [ "$FETCHED_TAG" == "None" ] || [ -z "$FETCHED_TAG" ]; then
+            echo "❌ Error: Could not find any images in ECR repository $REPO_NAME"
+            exit 1
+          fi
+
+          echo "✅ Found latest image tag: $FETCHED_TAG"
+          echo "final_image=$ECR_REGISTRY/$REPO_NAME:$FETCHED_TAG" >> $GITHUB_OUTPUT
 
       # ---------------------------------------------------------
       # FIXED: Correct Task Definition Fetch

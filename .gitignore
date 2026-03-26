@@ -5,3 +5,4 @@
 terraform.*
 task-defini*.json
 .gitlab-ci.yml
+*.pem

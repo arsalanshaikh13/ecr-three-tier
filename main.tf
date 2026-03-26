@@ -143,17 +143,35 @@ resource "aws_iam_policy" "ecs_task_secrets_policy" {
   name = "ecsTaskSecretsPolicy-${local.env_suffix}"
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Action   = ["secretsmanager:GetSecretValue",
-                  "secretsmanager:PutSecretValue",
-                  "secretsmanager:DescribeSecret"
-                ]
-      Effect   = "Allow"
-      Resource = [
-                  aws_secretsmanager_secret.mongodb_root_password.arn,
-                  aws_secretsmanager_secret.mongodb_uri.arn
-                 ]
-    }]
+    Statement = [
+      {
+        Sid      = "AllowReadingSecretsManager"
+        Action   = ["secretsmanager:GetSecretValue",
+                    "secretsmanager:PutSecretValue",
+                    "secretsmanager:DescribeSecret"
+                  ]
+        Effect   = "Allow"
+        Resource = [
+                    aws_secretsmanager_secret.mongodb_root_password.arn,
+                    aws_secretsmanager_secret.mongodb_uri.arn
+                  ]
+    },
+    {
+        Sid      = "AllowReadingSSMParameters"
+        Effect   = "Allow"
+        Action   = [
+          "ssm:GetParameters",
+          "ssm:GetParameter"
+        ]
+        # Ensure it can read your specific SSM Parameters
+        Resource = [
+          aws_ssm_parameter.better_auth_secret.arn,
+          aws_ssm_parameter.cognito_client_id.arn,
+          aws_ssm_parameter.cognito_client_secret.arn
+        ]
+      }
+    
+    ]
   })
 }
 
@@ -279,9 +297,9 @@ resource "aws_secretsmanager_secret_version" "mongodb_uri_val" {
     aws_lb.mongodb_internal.dns_name
   )
 
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
+  # lifecycle {
+  #   ignore_changes = [secret_string]
+  # }
 }
 
 
@@ -955,8 +973,8 @@ resource "aws_ecs_task_definition" "app" {
 
       environment = [
         { name = "NODE_ENV", value = local.env_suffix },
-        { name = "NEXT_PUBLIC_APP_URL", value = var.domain_name },
-        { name = "BETTER_AUTH_URL", value = var.domain_name },
+        { name = "NEXT_PUBLIC_APP_URL", value = "https://${var.domain_name}" },
+        { name = "BETTER_AUTH_URL", value = "https://${var.domain_name}" },
         { name = "COGNITO_DOMAIN", value = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${var.region}.amazoncognito.com" },
         { name = "COGNITO_REGION", value = var.region },
         { name = "COGNITO_USER_POOL_ID", value = aws_cognito_user_pool.main.id }
