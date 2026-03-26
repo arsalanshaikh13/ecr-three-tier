@@ -1096,7 +1096,8 @@ resource "aws_lb" "mongodb_internal" {
   load_balancer_type = "network"
   
   # Deploy this in your private subnets
-  subnets            = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id]
+  # subnets            = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id]
+  subnets            = [aws_subnet.pub_sub_1a.id, aws_subnet.pub_sub_2b.id]
 
   # AWS recently added Security Group support for NLBs. 
   # This ensures only your App tier can talk to the database tier.
