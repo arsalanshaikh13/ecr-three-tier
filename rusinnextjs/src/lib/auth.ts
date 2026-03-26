@@ -2,26 +2,37 @@ import { betterAuth } from "better-auth";
 import { MongoClient } from "mongodb";
 import { mongodbAdapter } from "better-auth/adapters/mongodb";
 import jwt from "jsonwebtoken";
-// const client = new MongoClient(process.env.MONGODB_URI!);
-// const db = client.db();
 
-const uri = process.env.MONGODB_URI!;
+// 1. Fallback to dummy so it doesn't throw if undefined
+const uri = process.env.MONGODB_URI || "mongodb://build-time-dummy";
+const isBuildTime = uri.includes("build-time-dummy");
+
 const client = new MongoClient(uri);
 
 let clientPromise: Promise<MongoClient>;
 
-if (!(global as any)._mongoClientPromise) {
-  (global as any)._mongoClientPromise = client.connect();
+// 2. The Build-Time Bypass
+if (!isBuildTime) {
+  // Normal Runtime: Actually connect to the database
+  if (!(global as any)._mongoClientPromise) {
+    (global as any)._mongoClientPromise = client.connect();
+  }
+  clientPromise = (global as any)._mongoClientPromise;
+} else {
+  // Build Time: Instantly resolve with an unconnected client
+  console.warn(
+    "⚠️ Build time detected in Auth. Skipping MongoClient.connect().",
+  );
+  clientPromise = Promise.resolve(client);
 }
-
-clientPromise = (global as any)._mongoClientPromise;
 
 export async function getDb() {
-  const client = await clientPromise;
-  return client.db();
+  const resolvedClient = await clientPromise;
+  // This works synchronously and safely without network calls
+  return resolvedClient.db();
 }
+
 export const auth = betterAuth({
-  // database: mongodbAdapter(db, {}),
   database: mongodbAdapter(await getDb(), {}),
   trustedHosts: ["*"],
 
@@ -37,11 +48,12 @@ export const auth = betterAuth({
 
   socialProviders: {
     cognito: {
-      clientId: process.env.COGNITO_CLIENT_ID as string,
-      clientSecret: process.env.COGNITO_CLIENT_SECRET as string,
-      domain: process.env.COGNITO_DOMAIN as string,
-      region: process.env.COGNITO_REGION as string,
-      userPoolId: process.env.COGNITO_USER_POOL_ID as string,
+      // 3. Optional safety fallback for string parsing during build
+      clientId: process.env.COGNITO_CLIENT_ID || "dummy-client-id",
+      clientSecret: process.env.COGNITO_CLIENT_SECRET || "dummy-client-secret",
+      domain: process.env.COGNITO_DOMAIN || "dummy-domain",
+      region: process.env.COGNITO_REGION || "dummy-region",
+      userPoolId: process.env.COGNITO_USER_POOL_ID || "dummy-user-pool-id",
       scope: ["email", "openid", "profile", "aws.cognito.signin.user.admin"],
 
       getUserInfo: async (token) => {
