@@ -1156,11 +1156,11 @@ resource "aws_ecs_task_definition" "app" {
         # curl command is missing in alpine linux
         # command     = ["CMD-SHELL", "curl -f http://localhost:3000 || exit 1"]
         # Using wget (native to Alpine), 127.0.0.1 (forces IPv4), and the new lightweight endpoint
-        command     = ["CMD-SHELL", "wget --no-verbose --tries=3 --spider http://localhost:3000/api/health || exit 1"]
+        command     = ["CMD-SHELL", "wget --no-verbose --tries=3 --spider http://127.0.0.1:3000/api/health || exit 1"]
         interval    = 30
         timeout     = 10
         retries     = 3
-        startPeriod = 40
+        startPeriod = 75
       }
 
       logConfiguration = {
@@ -1476,11 +1476,11 @@ resource "aws_lb_target_group" "app_external" {
   # ADD THIS LINE: Lower the wait time from 5 minutes to 30 seconds
   deregistration_delay = 30
 
-  # stickiness {
-  #   type            = "lb_cookie"
-  #   cookie_duration = 86400 # How long the stickiness lasts (in seconds). 86400 = 1 day.
-  #   enabled         = true
-  # }
+  stickiness {
+    type            = "lb_cookie"
+    cookie_duration = 86400 # How long the stickiness lasts (in seconds). 86400 = 1 day.
+    enabled         = true
+  }
   health_check {
     path                = "/api/health" # Or a dedicated /api/health route
     protocol            = "HTTP"
