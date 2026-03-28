@@ -68,6 +68,12 @@ resource "aws_cloudwatch_log_group" "ecs_log_group" {
     Name = "rusin-${each.key}-logs-${local.env_suffix}"
   })
 }
+
+# 1. Create a dedicated Log Group for your terminal sessions
+resource "aws_cloudwatch_log_group" "ecs_exec_logs" {
+  name              = "/ecs/execute-command/nextjs-cluster"
+  retention_in_days = 7
+}
 #---------------------------------------------
 # 3. IAM Roles (Tasks, Execution, and EC2 Nodes)
 #---------------------------------------------
@@ -247,6 +253,46 @@ resource "aws_iam_role_policy_attachment" "ecs_cognito_admin_attach" {
   policy_arn = aws_iam_policy.ecs_cognito_admin_policy.arn
 }
 
+
+
+
+# 2. Create the policy that allows the container to open a terminal
+resource "aws_iam_policy" "ecs_exec_policy" {
+  name = "nextjs-ecs-exec-policy"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssmmessages:CreateControlChannel",
+          "ssmmessages:CreateDataChannel",
+          "ssmmessages:OpenControlChannel",
+          "ssmmessages:OpenDataChannel"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:DescribeLogGroups",
+          "logs:DescribeLogStreams",
+          "logs:PutLogEvents"
+        ]
+        Resource = "${aws_cloudwatch_log_group.ecs_exec_logs.arn}:*"
+      }
+    ]
+  })
+}
+
+# 3. Attach the policy to your EXISTING Next.js Task Role
+# WARNING: Make sure this is your TASK role, not your EXECUTION role!
+resource "aws_iam_role_policy_attachment" "ecs_exec_attachment" {
+  role       = aws_iam_role.ecs_task_role.name # Change this if your role has a different name
+  policy_arn = aws_iam_policy.ecs_exec_policy.arn
+}
 #---------------------------------------------
 # SSM Parameter and Secrets Manager setup
 #---------------------------------------------
@@ -548,6 +594,16 @@ resource "aws_ecs_cluster" "app_cluster" {
   setting {
     name  = "containerInsights"
     value = "enabled"
+  }
+  configuration {
+    execute_command_configuration {
+      logging = "OVERRIDE" 
+      log_configuration {
+        # Set to false unless you also create and attach an aws_kms_key
+        cloud_watch_encryption_enabled = false 
+        cloud_watch_log_group_name     = aws_cloudwatch_log_group.ecs_exec_logs.name
+      }
+    }
   }
   tags = local.common_tags
 }
@@ -1499,6 +1555,7 @@ resource "aws_ecs_service" "app" {
   task_definition = aws_ecs_task_definition.app.arn
   desired_count   = 2 # Assuming you want high availability
   # launch_type     = "EC2"
+  enable_execute_command = true
 
   # Attach the service to the ALB Target Group
   load_balancer {
