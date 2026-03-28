@@ -12,8 +12,11 @@ import { can } from "./utils";
 export async function getTasksAction(userId: string): Promise<ITask[]> {
   try {
     const { user } = await verifySession();
-    if (!can(user, "read_tasks")) {
-      throw new Error("You are not authorized to perform this action");
+    // if (!can(user, "read_tasks")) {
+    //   throw new Error("You are not authorized to perform this action");
+    // }
+    if (!user) {
+      throw new Error("Unauthorized: Please log in to view tasks.");
     }
     await connectToDatabase();
 
@@ -42,10 +45,13 @@ export async function createTaskAction(taskData: {
 }): Promise<ITask> {
   try {
     const { user } = await verifySession();
-    if (!can(user, "create_tasks")) {
-      throw new Error("You are not authorized to perform this action");
-    }
+    // if (!can(user, "create_tasks")) {
+    //   throw new Error("You are not authorized to perform this action");
+    // }
 
+    if (!user) {
+      throw new Error("Unauthorized: Please log in to create tasks.");
+    }
     await connectToDatabase();
 
     const { name, description, dueDate } = taskData;
@@ -86,7 +92,10 @@ export async function updateTaskAction(
 ): Promise<ITask> {
   try {
     const { user } = await verifySession();
-    if (!can(user, "update_tasks")) {
+    // if (!can(user, "update_tasks")) {
+    //   throw new Error("You are not authorized to perform this action");
+    // }
+    if (!user) {
       throw new Error("You are not authorized to perform this action");
     }
     await connectToDatabase();
@@ -132,7 +141,10 @@ export async function deleteTaskAction(
 ): Promise<void> {
   try {
     const { user } = await verifySession();
-    if (!can(user, "delete_tasks")) {
+    // if (!can(user, "delete_tasks")) {
+    //   throw new Error("You are not authorized to perform this action");
+    // }
+    if (!user) {
       throw new Error("You are not authorized to perform this action");
     }
     await connectToDatabase();

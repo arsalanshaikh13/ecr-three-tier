@@ -32,7 +32,20 @@ export default function Navigation() {
       await signOut({
         fetchOptions: {
           onSuccess: () => {
-            router.push("/");
+            // 1. Define your Cognito endpoints
+            // Make sure these match your actual Terraform output/environment variables!
+            const cognitoDomain =
+              process.env.COGNITO_DOMAIN ||
+              "https://auth-devsandbox-space.auth.us-east-1.amazoncognito.com";
+            const clientId =
+              process.env.COGNITO_CLIENT_ID || "YOUR_ACTUAL_CLIENT_ID";
+
+            // 2. Define where Cognito should send the user AFTER destroying the cookie
+            // It MUST match one of the "logout_urls" you defined in your Terraform app client!
+            const logoutUri = "https://devsandbox.space/api/auth-logout";
+
+            // 3. Instead of using router.push("/"), redirect the browser directly to Cognito
+            window.location.href = `${cognitoDomain}/logout?client_id=${clientId}&logout_uri=${encodeURIComponent(logoutUri)}`;
           },
         },
       });
@@ -40,7 +53,6 @@ export default function Navigation() {
       console.error("Logout failed:", error);
     }
   };
-
   return (
     <nav className="bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 shadow-sm">
       <div className="px-6 py-4 flex items-center justify-between max-w-7xl mx-auto">
