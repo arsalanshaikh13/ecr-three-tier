@@ -1,7 +1,9 @@
 ##############################################
 # PRODUCTION-GRADE ECS on EC2 with Auto Scaling
 ##############################################
-
+# alex rusin
+# https://www.youtube.com/watch?v=KDU509pjj0I - Deploy Node.js to AWS EC2 with Docker, Database & Cognito Authentication
+# https://blog.alexrusin.com/from-localhost-to-the-cloud-deploying-full-stack-apps-on-aws-ec2/#
 #---------------------------------------------
 # 1. ECR Repository (Immutable + Lifecycle)
 #---------------------------------------------
