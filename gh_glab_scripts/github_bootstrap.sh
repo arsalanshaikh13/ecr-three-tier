@@ -7,6 +7,13 @@ echo "🚀 Bootstrapping $REPO_NAME..."
 
 # 1. Create GH Repo
 gh repo create "$GH_USER/$REPO_NAME" --private
+# to browse files on browser
+gh repo view "$GH_USER/$REPO_NAME" --web 
+gh api repos/$GH_USER/$REPO_NAME/contents 
+#for a terminal-based list.
+# To download the code: Run to create a local copy.
+gh repo clone "$GH_USER/$REPO_NAME"
+ 
 
 # 2. Set AWS Environment Variables (Repo Level)
 gh variable set AWS_REGION --body "us-east-1" --repo "$GH_USER/$REPO_NAME"

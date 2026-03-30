@@ -117,7 +117,7 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           # Dynamically set repository based on matrix component
-          ECR_REPOSITORY: lirwEcr-${{ matrix.component }}
+          ECR_REPOSITORY: lirw-ecr-${{ matrix.component }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
           cd lirw-three-tier/${{ matrix.component }}
@@ -183,7 +183,7 @@ jobs:
         id: build-seeder
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: lirwEcr-database-seed-repo-${{ vars.ENV_VAR }}
+          ECR_REPOSITORY: lirw-ecr-database-seed-repo-${{ vars.ENV_VAR }}
           IMAGE_TAG: ${{ github.sha }} # Use SHA for a unique tag
         run: |
           cd lirw-three-tier/database-seeder
