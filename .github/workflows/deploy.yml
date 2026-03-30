@@ -130,7 +130,8 @@ jobs:
 
       - name: Build, tag, and push image to Amazon ECR
         id: build-image
-        if: ${{ inputs.build_frontend == true || inputs.build_backend == true }}
+        # CRITICAL: If the array is empty, skip this job entirely to prevent matrix errors
+        if: (inputs.build_frontend == true || inputs.build_backend == true) || github.event_name == 'push'
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           # Dynamically set repository based on matrix component
@@ -150,7 +151,7 @@ jobs:
 
       - name: Determine Image URI (Fetch from ECR)
         id: determine-image
-        if: ${{ inputs.get_frontend == true || inputs.get_backend == true }}
+        if: (inputs.get_frontend == true || inputs.get_backend == true) || github.event_name == 'push'
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           ECR_REPOSITORY: lirw-ecr-${{ matrix.component }}-repo-${{ vars.ENV_VAR }}
