@@ -15,11 +15,21 @@ on:
         type: boolean
         required: true
         default: true
+      get_frontend:
+        description: "Get Frontend image from ECR?"
+        type: boolean
+        required: true
+        default: false
       build_backend:
         description: "Build & Deploy Backend?"
         type: boolean
         required: true
         default: true
+      get_backend:
+        description: "Get Backend image from ECR?"
+        type: boolean
+        required: true
+        default: false
       run_seeding:
         description: "Build Seeder & Seed Database?"
         type: boolean
@@ -63,18 +73,24 @@ jobs:
         run: |
           COMPONENTS=()
 
-          # Check logic for a push event
+          # 1. PUSH EVENT: Only build based on path filters
           if [ "${{ github.event_name }}" == "push" ]; then
             if [ "${{ steps.filter.outputs.frontend }}" == "true" ]; then COMPONENTS+=("frontend"); fi
             if [ "${{ steps.filter.outputs.backend }}" == "true" ]; then COMPONENTS+=("backend"); fi
 
-          # Check logic for a manual trigger
+          # 2. MANUAL TRIGGER: Include if EITHER build or get is true
           elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            if [ "${{ inputs.build_frontend }}" == 'true' ]; then COMPONENTS+=("frontend"); fi
-            if [ "${{ inputs.build_backend }}" == 'true' ]; then COMPONENTS+=("backend"); fi
+            # Check Frontend
+            if [[ "${{ inputs.build_frontend }}" == "true" || "${{ inputs.get_frontend }}" == "true" ]]; then
+               COMPONENTS+=("frontend")
+            fi
+            # Check Backend
+            if [[ "${{ inputs.build_backend }}" == "true" || "${{ inputs.get_backend }}" == "true" ]]; then
+               COMPONENTS+=("backend")
+            fi
           fi
 
-          # Convert the bash array into a JSON array using jq
+          # Convert to JSON
           if [ ${#COMPONENTS[@]} -eq 0 ]; then
             MATRIX_JSON="[]"
           else
@@ -114,6 +130,7 @@ jobs:
 
       - name: Build, tag, and push image to Amazon ECR
         id: build-image
+        if: ${{ inputs.build_frontend == true || inputs.build_backend == true }}
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           # Dynamically set repository based on matrix component
@@ -128,9 +145,34 @@ jobs:
             .
             
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Determine Image URI (Fetch from ECR)
+        id: determine-image
+        if: ${{ inputs.get_frontend == true || inputs.get_backend == true }}
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: lirw-ecr-${{ matrix.component }}-repo-${{ vars.ENV_VAR }}
+
+        run: |
+          # 1. If the user left the input as 'latest', dynamically fetch the most recent tag from ECR
+          echo "🔍 Fetching the most recently pushed image tag from ECR for $REPO_NAME..."
+
+          # AWS CLI command to get the latest pushed image tag
+          FETCHED_TAG=$(aws ecr describe-images \
+            --repository-name $ECR_REPOSITORY \
+            --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags[0]' \
+            --output text)
+
+          # Safety check: ensure we actually found a tag
+          if [ "$FETCHED_TAG" == "None" ] || [ -z "$FETCHED_TAG" ]; then
+            echo "❌ Error: Could not find any images in ECR repository $REPO_NAME"
+            exit 1
+          fi
+
+          echo "✅ Found latest image tag: $FETCHED_TAG"
+          echo "final_image=$ECR_REGISTRY/$ECR_REPOSITORY:$FETCHED_TAG" >> $GITHUB_OUTPUT
 
       - name: Download current ECS task definition
         env:
@@ -191,7 +233,6 @@ jobs:
           # Build and push with a unique tag AND the latest tag
           docker build --file=db.Dockerfile -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:seeder-latest .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:seeder-latest
 
           # Output the unique image URI so the next step can use it
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
