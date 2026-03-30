@@ -296,7 +296,7 @@ jobs:
           # 2. Fetch Password from Secrets Manager
           # If your secret is JSON, you might need to parse it with jq. 
           # Assuming it's just a raw string here:
-          DB_PASSWORD=$(aws secretsmanager get-secret-value --secret-id "rds-db-password-${{ vars.ENV_VAR }}" --query "SecretString" --output text)
+          DB_PASSWORD=$(aws secretsmanager get-secret-value --secret-id "/lirw-ecr/${{ vars.ENV_VAR }}/rds-root-password" --query "SecretString" --output text)
 
           # 3. CRITICAL SECURITY STEP: Mask the password in GitHub Actions logs
           echo "::add-mask::$DB_PASSWORD"
