@@ -28,7 +28,7 @@ app_sg_id = "sg-id2"
 app_cpu       = 512 # 0.5 vCPU
 app_memory    = 1024 # 1 GB
 image_tag     = "latest"
-desired_count = 1
+desired_count = 2
 
 db_cpu = 1024
 db_memory = 2048

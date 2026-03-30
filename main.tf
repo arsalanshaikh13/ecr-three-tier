@@ -394,8 +394,8 @@ resource "aws_security_group" "internal_alb_sg" {
 
   ingress {
     description = "http access"
-    from_port   = 4000
-    to_port     = 4000
+    from_port   = 3200
+    to_port     = 3200
     protocol    = "tcp"
     security_groups = [aws_security_group.ecs_node_frontend_sg.id]
   }
@@ -492,8 +492,8 @@ resource "aws_security_group" "ecs_node_backend_sg" {
 
   ingress {
     description = "node port access"
-    from_port   = 4000
-    to_port     = 4000
+    from_port   = 3200
+    to_port     = 3200
     protocol    = "tcp"
     security_groups = [aws_security_group.internal_alb_sg.id]
   }
@@ -708,7 +708,8 @@ locals {
     }
     backend = {
       instance_type = "c7i-flex.large"
-      subnets       = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id]
+      # subnets       = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id]
+      subnets       = [aws_subnet.pub_sub_1a.id, aws_subnet.pub_sub_2b.id]
       sg_id         = aws_security_group.ecs_node_backend_sg.id
     }
   }
@@ -742,7 +743,7 @@ resource "aws_autoscaling_group" "ecs_asg" {
   vpc_zone_identifier = each.value.subnets
   
   min_size         = 1
-  max_size         = 3
+  max_size         = 2
   desired_capacity = 1
 
   launch_template {
@@ -800,18 +801,26 @@ resource "aws_ecs_capacity_provider" "ec2_provider" {
 }
 
 # i have already defined separately inside ecs service capacity provider strategy so not needed here
-# resource "aws_ecs_cluster_capacity_providers" "cluster_attach" {
-#   for_each = local.ecs_apps
+resource "aws_ecs_cluster_capacity_providers" "cluster_attach" {
+  for_each = local.ecs_apps
 
-#   cluster_name = aws_ecs_cluster.app_cluster.name
-#   capacity_providers = [aws_ecs_capacity_provider.ec2_provider[each.key].name]
+  cluster_name = aws_ecs_cluster.app_cluster.name
+# Register BOTH providers at once
+  capacity_providers = [
+    aws_ecs_capacity_provider.ec2_provider["frontend"].name,
+    aws_ecs_capacity_provider.ec2_provider["backend"].name
+  ]
+  
+  # capacity_providers = [
+  #   aws_ecs_capacity_provider.ec2_provider[each.key].name,
+  # ]
 
-#   default_capacity_provider_strategy {
-#     base              = 1
-#     weight            = 100
-#     capacity_provider = aws_ecs_capacity_provider.ec2_provider[each.key].name
-#   }
-# }
+  # default_capacity_provider_strategy {
+  #   base              = 1
+  #   weight            = 100
+  #   capacity_provider = aws_ecs_capacity_provider.ec2_provider[each.key].name
+  # }
+}
 
 
 #---------------------------------------------
@@ -1131,7 +1140,7 @@ resource "aws_ecs_task_definition" "backend" {
       
       portMappings = [
         {
-          containerPort = 4000
+          containerPort = 3200
           # hostPort      = 27017
           protocol      = "tcp"
         }
@@ -1159,7 +1168,7 @@ resource "aws_ecs_task_definition" "backend" {
 
       healthCheck = {
         # command     = ["CMD-SHELL", "echo 'db.runCommand(\"ping\").ok' | mongosh localhost:27017/test --quiet"]
-        command     = ["CMD-SHELL", "wget --no-verbose --tries=3 --spider http://127.0.0.1:4000/health || exit 1"]
+        command     = ["CMD-SHELL", "wget --no-verbose --tries=3 --spider http://127.0.0.1:3200/health || exit 1"]
         interval    = 10
         timeout     = 5
         retries     = 5
@@ -1176,6 +1185,13 @@ resource "aws_ecs_task_definition" "backend" {
       }
     }
   ])
+  #   lifecycle {
+  #   ignore_changes = [
+  #     # container_definitions,
+  #     # desired_count
+  #   ]
+  # }
+
 }
 
 resource "aws_ecs_task_definition" "app" {
@@ -1231,6 +1247,12 @@ resource "aws_ecs_task_definition" "app" {
       }
     }
   ])
+  lifecycle {
+    ignore_changes = [
+      container_definitions,
+    ]
+  }
+
 }
 #---------------------------------------------
 # 11. ECS Service
@@ -1316,12 +1338,12 @@ resource "aws_ecs_task_definition" "app" {
 #   deployment_minimum_healthy_percent = 100 
 #   deployment_maximum_percent         = 200
 
-#   lifecycle {
-#     ignore_changes = [
-#       task_definition,
-#       desired_count
-#     ]
-#   }
+  # lifecycle {
+  #   ignore_changes = [
+  #     task_definition,
+  #     desired_count
+  #   ]
+  # }
 
 #   depends_on = [
 #     aws_lb_listener.app_listener_https_secure,
@@ -1334,13 +1356,13 @@ resource "aws_ecs_task_definition" "app" {
 # The Internal Network Load Balancer
 resource "aws_lb" "backend_internal" {
   name               = "backend-internal-nlb-${local.env_suffix}"
-  internal           = true
+  internal           = false
   load_balancer_type = "application"
   enable_cross_zone_load_balancing = true
   
   # Deploy this in your private subnets
-  subnets            = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id]
-  # subnets            = [aws_subnet.pub_sub_1a.id, aws_subnet.pub_sub_2b.id]
+  # subnets            = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id]
+  subnets            = [aws_subnet.pub_sub_1a.id, aws_subnet.pub_sub_2b.id]
 
   # AWS recently added Security Group support for NLBs. 
   # This ensures only your App tier can talk to the database tier.
@@ -1350,7 +1372,7 @@ resource "aws_lb" "backend_internal" {
 # The TCP Listener
 resource "aws_lb_listener" "backend_listener" {
   load_balancer_arn = aws_lb.backend_internal.arn
-  port              = "4000"
+  port              = "3200"
   protocol          = "HTTP"
 
   default_action {
@@ -1391,12 +1413,13 @@ resource "aws_ecs_service" "backend" {
   task_definition = aws_ecs_task_definition.backend.arn
   desired_count   = var.desired_count
   # launch_type     = "EC2"
+  enable_execute_command = true
 
   # Attach the service to the NLB Target Group
   load_balancer {
     target_group_arn = aws_lb_target_group.backend_internal.arn
     container_name   = "lirw_ecr_backend"
-    container_port   = 4000
+    container_port   = 3200
   }
 
 
@@ -1417,12 +1440,12 @@ resource "aws_ecs_service" "backend" {
   deployment_minimum_healthy_percent = 100 
   deployment_maximum_percent         = 200
 
-  lifecycle {
-    ignore_changes = [
-      task_definition,
-      desired_count
-    ]
-  }
+  # lifecycle {
+  #   ignore_changes = [
+  #     # task_definition,
+  #     # desired_count
+  #   ]
+  # }
 
   depends_on = [
     aws_lb_listener.backend_listener,
@@ -1510,7 +1533,7 @@ resource "aws_ecs_service" "app" {
   name            = "frontend-service"
   cluster         = aws_ecs_cluster.app_cluster.id # Replace with your cluster ID
   task_definition = aws_ecs_task_definition.app.arn
-  desired_count   = 2 # Assuming you want high availability
+  desired_count   = var.desired_count # Assuming you want high availability
   # launch_type     = "EC2"
   enable_execute_command = true
 
@@ -1542,7 +1565,7 @@ resource "aws_ecs_service" "app" {
   lifecycle {
     ignore_changes = [
       task_definition,
-      desired_count
+      # desired_count
     ]
   }
 

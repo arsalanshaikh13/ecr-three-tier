@@ -15,11 +15,11 @@ COPY . .
 
 
 # Expose the port your app-tier uses (based on your script's health check)
-EXPOSE 4000
+EXPOSE 3200
 
 # Set environment to production
 ENV NODE_ENV=production
 
 # ECS handles the process management. We run the node process directly
 # instead of using PM2 to ensure logs flow correctly to CloudWatch.
-CMD ["node", "index.js"]
+CMD ["node", "server.js"]
