@@ -199,7 +199,7 @@ jobs:
       - name: Download current Seeder task definition
         run: |
           aws ecs describe-task-definition \
-            --task-definition db-seeder \
+            --task-definition db-seeder-${{ vars.ENV_VAR }} \
             --query taskDefinition > task-definition-seeder.json
 
       - name: Render new task definition with new image
