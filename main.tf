@@ -1,15 +1,17 @@
 ##############################################
 # PRODUCTION-GRADE ECS on EC2 with Auto Scaling
 ##############################################
-# alex rusin
-# https://www.youtube.com/watch?v=KDU509pjj0I - Deploy Node.js to AWS EC2 with Docker, Database & Cognito Authentication
-# https://blog.alexrusin.com/from-localhost-to-the-cloud-deploying-full-stack-apps-on-aws-ec2/#
+
 #---------------------------------------------
 # 1. ECR Repository (Immutable + Lifecycle)
 #---------------------------------------------
+locals {
+  ecr_names = toset(["frontend", "backend"])
+}
 
 resource "aws_ecr_repository" "app_repos" {
-  name                 = "rusin-nextjs-app-repo-${local.env_suffix}"
+  for_each = local.ecr_names
+  name                 = "lirwEcr-${each.key}-repo-${local.env_suffix}"
   image_tag_mutability = "IMMUTABLE"
   force_delete         = true
 
@@ -22,7 +24,7 @@ resource "aws_ecr_repository" "app_repos" {
   }
 
   tags = merge(local.common_tags, { 
-    Name = "ecr-rusin-${local.env_suffix}" 
+    Name = "ecr-lirwEcr-${local.env_suffix}" 
   })
 }
 
@@ -50,24 +52,24 @@ resource "aws_ecr_lifecycle_policy" "app_repo_lifecycle" {
 # 2. CloudWatch Log Group
 #---------------------------------------------
 # resource "aws_cloudwatch_log_group" "ecs_log_group" {
-#   name              = "/ecs/rusin-${local.env_suffix}"
+#   name              = "/ecs/lirwEcr-${local.env_suffix}"
 #   retention_in_days = 30 
 #   tags              = local.common_tags
 # }
-locals {
-  ecr_names = toset(["app", "mongo"])
-}
+# locals {
+#   ecr_names = toset(["frontend", "backend"])
+# }
 
 resource "aws_cloudwatch_log_group" "ecs_log_group" {
   # Loops through dashboard, books, and authors
   for_each          = local.ecr_names 
   
-  # Creates distinct names like /ecs/rusin-books-dev
-  name              = "/ecs/rusin-${each.key}-${local.env_suffix}"
+  # Creates distinct names like /ecs/lirwEcr-books-dev
+  name              = "/ecs/lirwEcr-${each.key}-${local.env_suffix}"
   retention_in_days = 30 
   
   tags = merge(local.common_tags, {
-    Name = "rusin-${each.key}-logs-${local.env_suffix}"
+    Name = "lirwEcr-${each.key}-logs-${local.env_suffix}"
   })
 }
 
@@ -160,7 +162,7 @@ resource "aws_iam_policy" "ecs_task_secrets_policy" {
                   ]
         Effect   = "Allow"
         Resource = [
-                    aws_secretsmanager_secret.mongodb_root_password.arn,
+                    aws_secretsmanager_secret.rdsdb_root_password.arn,
                     aws_secretsmanager_secret.mongodb_uri.arn
                   ]
     },
@@ -336,18 +338,18 @@ resource "random_password" "mongodb_password" {
   length  = 16
   special = false
 }
-resource "aws_secretsmanager_secret" "mongodb_root_password" {
-  name        = "/nextjs-task-manager/prod/mongodb-root-password"
-  description = "Root password for the MongoDB container"
+resource "aws_secretsmanager_secret" "rdsdb_root_password" {
+  name        = "/lirw-ecr/prod/rds-root-password"
+  description = "Root password for the rds container"
   recovery_window_in_days = 0 
   tags = merge(local.common_tags, { Name = "${var.project_name}-mongo-password-secret" })
 
 
 }
 # Store just the password in Secrets Manager for the MongoDB container to usehttp
-resource "aws_secretsmanager_secret_version" "mongodb_root_password_val" {
-  secret_id     = aws_secretsmanager_secret.mongodb_root_password.id
-  secret_string = random_password.mongodb_password.result
+resource "aws_secretsmanager_secret_version" "rdsdb_root_password_val" {
+  secret_id     = aws_secretsmanager_secret.rdsdb_root_password.id
+  secret_string = aws_db_instance.mysql_db.password
   #   lifecycle {
   #   ignore_changes = [secret_string]
   # }
@@ -364,20 +366,20 @@ resource "aws_secretsmanager_secret" "mongodb_uri" {
 
 
 }
-resource "aws_secretsmanager_secret_version" "mongodb_uri_val" {
-  secret_id     = aws_secretsmanager_secret.mongodb_uri.id
+# resource "aws_secretsmanager_secret_version" "mongodb_uri_val" {
+#   secret_id     = aws_secretsmanager_secret.mongodb_uri.id
   
-  # Dynamically builds: mongodb://admin:<random_password>@<internal-nlb-dns>:27017/task_manager?authSource=admin
-  secret_string = format(
-    "mongodb://admin:%s@%s:27017/task_manager?authSource=admin&directConnection=true",
-    random_password.mongodb_password.result,
-    aws_lb.mongodb_internal.dns_name
-  )
+#   # Dynamically builds: mongodb://admin:<random_password>@<internal-nlb-dns>:27017/task_manager?authSource=admin
+#   secret_string = format(
+#     "mongodb://admin:%s@%s:27017/task_manager?authSource=admin&directConnection=true",
+#     random_password.mongodb_password.result,
+#     aws_lb.mongodb_internal.dns_name
+#   )
 
-  # lifecycle {
-  #   ignore_changes = [secret_string]
-  # }
-}
+#   # lifecycle {
+#   #   ignore_changes = [secret_string]
+#   # }
+# }
 
 
 #---------------------------------------------
@@ -418,40 +420,48 @@ resource "aws_security_group" "alb_sg" {
   })
 }
 
+resource "aws_security_group" "internal_alb_sg" {
+  name        = "internal alb security group"
+  description = "enable http/https access on port 80/443"
+  vpc_id      = aws_vpc.vpc.id
+
+  ingress {
+    description = "http access"
+    from_port   = 4000
+    to_port     = 4000
+    protocol    = "tcp"
+    cidr_blocks = [aws_security_group.ecs_node_frontend_sg.id]
+  }
+
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = -1
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "alb_sg"
+  })
+}
+
 
 
 # NEW: Node SG (For the underlying EC2 instances to talk to AWS endpoints)
-resource "aws_security_group" "ecs_node_sg" {
+resource "aws_security_group" "ecs_node_frontend_sg" {
   name        = "ecs-node-sg-${local.env_suffix}"
-  description = "SG for ECS EC2 nodes"
+  description = "SG for ECS EC2 nodes frontend"
   vpc_id      = aws_vpc.vpc.id
-  # ingress {
-  #   description = "node port access"
-  #   from_port   = 3200
-  #   to_port     = 3200
-  #   protocol    = "tcp"
-  #   cidr_blocks = ["0.0.0.0/0"]
-  # }
-  # ingress {
-  #   description = "node port access"
-  #   from_port   = 80
-  #   to_port     = 80
-  #   protocol    = "tcp"
-  #   cidr_blocks = ["0.0.0.0/0"]
-  # }
+  
+  ingress {
+    description = "node port access"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = [aws_security_group.alb_sg.id]
+  }
 
-# Dynamically creates ingress rules for 3200, 3300, and 3400
-  # dynamic "ingress" {
-  #   for_each = local.services
-  #   content {
-  #     description     = "Access for ${ingress.key} from ALB"
-  #     from_port       = ingress.value.port
-  #     to_port         = ingress.value.port
-  #     protocol        = "tcp"
-  #     # Only allow traffic that comes through the Load Balancer
-  #     security_groups = [aws_security_group.alb_sg.id] 
-  #   }
-  # }
 # 1. Existing Rule: Allow Public ALB to hit Ephemeral Ports
   # ingress {
   #   description     = "node port access from ALB"
@@ -477,26 +487,92 @@ resource "aws_security_group" "ecs_node_sg" {
   #   security_groups = [aws_security_group.mongodb_nlb.id]
   # }
 
-  # 3. NEW: The Hairpin Fix (Self-Referencing)
-  # Allows containers on the same EC2 node to talk to each other
-  ingress {
-    description = "Mongo ingress via NLB Client IP Preservation (Hairpin)"
-    from_port   = 27017
-    to_port     = 27017
-    protocol    = "tcp"
-    self        = true # This tells the SG to allow traffic from itself!
-  }
+  # # 3. NEW: The Hairpin Fix (Self-Referencing)
+  # # Allows containers on the same EC2 node to talk to each other
+  # ingress {
+  #   description = "Mongo ingress via NLB Client IP Preservation (Hairpin)"
+  #   from_port   = 27017
+  #   to_port     = 27017
+  #   protocol    = "tcp"
+  #   self        = true # This tells the SG to allow traffic from itself!
+  # }
 
 # Bulletproof Internal VPC Rule for MongoDB
+  # ingress {
+  #   description = "Allow all internal VPC traffic to hit MongoDB"
+  #   from_port   = 27017
+  #   to_port     = 27017
+  #   protocol    = "tcp"
+  #   # Replace with your actual VPC CIDR if it is different!
+  #   cidr_blocks = ["10.0.0.0/16"] 
+  # }
+
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_security_group" "ecs_node_backend_sg" {
+  name        = "ecs-node-sg-${local.env_suffix}"
+  description = "SG for ECS EC2 nodes backend"
+  vpc_id      = aws_vpc.vpc.id
+  
+    # 2. NEW: Allow the Internal NLB to route traffic to the Mongo Container
+
   ingress {
-    description = "Allow all internal VPC traffic to hit MongoDB"
-    from_port   = 27017
-    to_port     = 27017
+    description = "node port access"
+    from_port   = 4000
+    to_port     = 4000
     protocol    = "tcp"
-    # Replace with your actual VPC CIDR if it is different!
-    cidr_blocks = ["10.0.0.0/16"] 
+    cidr_blocks = [aws_security_group.internal_alb_sg.id]
   }
 
+
+  # # 3. NEW: The Hairpin Fix (Self-Referencing)
+  # # Allows containers on the same EC2 node to talk to each other
+  # ingress {
+  #   description = "Mongo ingress via NLB Client IP Preservation (Hairpin)"
+  #   from_port   = 27017
+  #   to_port     = 27017
+  #   protocol    = "tcp"
+  #   self        = true # This tells the SG to allow traffic from itself!
+  # }
+
+# Bulletproof Internal VPC Rule for MongoDB
+  # ingress {
+  #   description = "Allow all internal VPC traffic to hit MongoDB"
+  #   from_port   = 27017
+  #   to_port     = 27017
+  #   protocol    = "tcp"
+  #   # Replace with your actual VPC CIDR if it is different!
+  #   cidr_blocks = ["10.0.0.0/16"] 
+  # }
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_security_group" "ecs_node_rds_sg" {
+  name        = "ecs-node-sg-${local.env_suffix}"
+  description = "SG for ECS EC2 nodes rds"
+  vpc_id      = aws_vpc.vpc.id
+  
+    # 2. NEW: Allow the Internal NLB to route traffic to the Mongo Container
+
+  ingress {
+    description = "node port access"
+    from_port   = 3306
+    to_port     = 3306
+    protocol    = "tcp"
+    cidr_blocks = [aws_security_group.ecs_node_backend_sg.id]
+  }
 
   egress {
     from_port   = 0
@@ -548,6 +624,100 @@ resource "aws_security_group" "ecs_node_sg" {
 #   }
 # }
 #---------------------------------------------
+# 6. RDS setup
+#---------------------------------------------
+
+
+resource "aws_db_subnet_group" "main" {
+  name       = "rds-subnet-group-${local.env_suffix}"
+  subnet_ids = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id]
+
+  tags = {
+    Name = "Main DB Subnet Group"
+  }
+}
+resource "aws_db_instance" "mysql_db" {
+  identifier           = "app-db-${local.env_suffix}"
+  allocated_storage    = 20
+  storage_type         = "gp3"
+  engine               = "mysql"
+  engine_version       = "8.0"
+  instance_class       = "db.t3.micro" # Burstable instance for dev
+  
+  db_name              = "myappdb"
+  username             = "admin"
+  password             = "YourSecurePassword123!" # Ideally use a Secret Manager here
+  
+  db_subnet_group_name = aws_db_subnet_group.main.name
+  vpc_security_group_ids = [aws_security_group.rds_sg.id]
+  
+  parameter_group_name = "default.mysql8.0"
+  publicly_accessible  = false
+  skip_final_snapshot  = true
+}
+
+# Output the endpoint so you can pass it to your seeder task
+output "rds_endpoint" {
+  value = aws_db_instance.mysql_db.endpoint
+}
+
+
+
+
+resource "aws_ecs_task_definition" "db_seeder" {
+  family                   = "db-seeder-${local.env_suffix}"
+  requires_compatibilities = ["EC2"]
+  network_mode             = "awsvpc" # Required for security group assignment
+  cpu                      = "256"
+  memory                   = "512"
+
+  container_definitions = jsonencode([
+    {
+      name      = "mysql-seeder"
+      image     = "alpine/mysql:seeder-latest" # Replace with your seeder image tag
+      essential = true
+      
+      environment = [
+        { name = "DB_HOST", value = aws_db_instance.mysql_db.address },
+        { name = "DB_NAME", value = aws_db_instance.mysql_db.db_name },
+        { name = "DB_USER", value = aws_db_instance.mysql_db.username },
+        { name = "DB_PASSWORD", value = aws_secretsmanager_secret.password.secret } # In prod, use Secrets Manager
+      ]
+
+      log_configuration = {
+        log_driver = "awslogs"
+        options = {
+          "awslogs-group"         = "/ecs/db-seeder-${local.env_suffix}"
+          "awslogs-region"        = "us-east-1"
+          "awslogs-stream-prefix" = "seeder"
+        }
+      }
+    }
+  ])
+}
+
+# Create the log group so you can see the seeding output
+resource "aws_cloudwatch_log_group" "seeder_logs" {
+  name              = "/ecs/db-seeder-${local.env_suffix}"
+  retention_in_days = 7
+}
+
+resource "terraform_data" "db_migration" {
+  # This triggers only when the task definition ARN changes
+  triggers_replace = [aws_ecs_task_definition.db_seeder.arn]
+# This ensures the seeder runs AFTER the DB and Task Definition are ready
+  depends_on = [aws_db_instance.mysql_db, aws_ecs_task_definition.db_seeder]
+  provisioner "local-exec" {
+    command = <<EOT
+      aws ecs run-task \
+        --cluster ${aws_ecs_cluster.app_cluster.name} \
+        --task-definition ${aws_ecs_task_definition.db_seeder.arn} \
+        --launch-type EC2 \
+        --network-configuration 'awsvpcConfiguration={subnets=["${aws_subnet.pri_sub_3a.id}"],securityGroups=["${aws_security_group.ecs_node_backend_sg.id}"]}'
+    EOT
+  }
+}
+#---------------------------------------------
 # 6. EC2 Auto Scaling Group & Launch Template
 #---------------------------------------------
 # Dynamically fetch the latest Amazon Linux 2023 ECS-Optimized AMI
@@ -555,17 +725,34 @@ data "aws_ssm_parameter" "ecs_optimized_ami" {
   name = "/aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id"
 }
 
+locals {
+  ecs_apps = {
+    frontend = {
+      instance_type = "c7i-flex.large"
+      subnets       = [aws_subnet.pub_sub_1a.id, aws_subnet.pub_sub_2b.id]
+      sg_id         = aws_security_group.ecs_node_frontend_sg.id
+    }
+    backend = {
+      instance_type = "c7i-flex.large"
+      subnets       = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id]
+      sg_id         = aws_security_group.ecs_node_backend_sg.id
+    }
+  }
+}
+
 resource "aws_launch_template" "ecs_lt" {
-  name_prefix   = "ecs-template-${local.env_suffix}"
+  for_each = local.ecs_apps
+
+  name_prefix   = "ecs-${each.key}-template-"
   image_id      = data.aws_ssm_parameter.ecs_optimized_ami.value
-  # instance_type = "t3.medium"
-  instance_type = "c7i-flex.large"
+  instance_type = each.value.instance_type
 
   iam_instance_profile {
     name = aws_iam_instance_profile.ecs_node_profile.name
   }
 
-  vpc_security_group_ids = [aws_security_group.ecs_node_sg.id]
+  # This now dynamically picks the correct SG
+  vpc_security_group_ids = [each.value.sg_id]
 
   user_data = base64encode(<<-EOF
     #!/bin/bash
@@ -575,16 +762,17 @@ resource "aws_launch_template" "ecs_lt" {
 }
 
 resource "aws_autoscaling_group" "ecs_asg" {
-  name                = "ecs-asg-${local.env_suffix}"
-  vpc_zone_identifier = [aws_subnet.pub_sub_1a.id, aws_subnet.pub_sub_2b.id]
-  # vpc_zone_identifier = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id]
+  for_each = local.ecs_apps
+
+  name                = "ecs-asg-${each.key}-${local.env_suffix}"
+  vpc_zone_identifier = each.value.subnets
   
   min_size         = 1
   max_size         = 3
   desired_capacity = 1
 
   launch_template {
-    id      = aws_launch_template.ecs_lt.id
+    id      = aws_launch_template.ecs_lt[each.key].id
     version = "$Latest"
   }
 
@@ -593,8 +781,13 @@ resource "aws_autoscaling_group" "ecs_asg" {
     value               = true
     propagate_at_launch = true
   }
-}
 
+  tag {
+    key                 = "Name"
+    value               = "ecs-node-${each.key}"
+    propagate_at_launch = true
+  }
+}
 #---------------------------------------------
 # 7. ECS Cluster & Capacity Provider
 #---------------------------------------------
@@ -642,174 +835,6 @@ resource "aws_ecs_cluster_capacity_providers" "cluster_attach" {
   }
 }
 
-#---------------------------------------------
-# 8. AWS Cognito setup
-#---------------------------------------------
-
-# 1. The Cognito User Pool
-# This is the core directory that holds your users.
-resource "aws_cognito_user_pool" "main" {
-  name = "nextjs-task-manager-pool"
-
-  # Allow users to sign in with their email address instead of a standard username
-  # alias_attributes = ["email"]
-  username_attributes = ["email"]
-
-  # Automatically verify the email address when a new user signs up
-  auto_verified_attributes = ["email"]
-
-  # Standard security password policy
-  password_policy {
-    minimum_length    = 8
-    require_lowercase = true
-    require_numbers   = true
-    require_symbols   = true
-    require_uppercase = true
-  }
-
-  # Customize the verification email sent to new users
-  verification_message_template {
-      email_message = "Welcome to the Task Manager! Your verification code is {####}."
-      email_subject = "Verify your email address"
-      default_email_option = "CONFIRM_WITH_CODE" 
-  }
-
-# This forces the Sign-Up page to require a Name
-  schema {
-    name                     = "name"
-    attribute_data_type      = "String"
-    developer_only_attribute = false
-    mutable                  = true
-    required                 = true
-    
-    string_attribute_constraints {
-      min_length = 0
-      max_length = 256
-    }
-  }
-  # Optional: Keep the user pool lean by deleting users if you destroy the infrastructure
-  # lifecycle {
-  #   prevent_destroy = false
-  # }
-}
-
-# 2. The Cognito User Pool Domain
-# Required for the Hosted UI and OAuth 2.0 endpoints to function.
-resource "aws_cognito_user_pool_domain" "main" {
-  # IMPORTANT: This domain prefix must be globally unique across all of AWS.
-  # You may need to change "task-app-auth-123" if it is already taken.
-  domain       = "auth-devsandbox-space" 
-  user_pool_id = aws_cognito_user_pool.main.id
-
-  # This tells AWS to use the brand new Modern UI instead of the old HTML one
-  managed_login_version = 2
-}
-
-resource "aws_cognito_managed_login_branding" "nextjs_branding" {
-  # Link it to your EXISTING standard app client
-  client_id    = aws_cognito_user_pool_client.nextjs_client.id
-  user_pool_id = aws_cognito_user_pool.main.id
-
-  # This tells AWS: "Just generate the default modern V2 look"
-  use_cognito_provided_values = true
-}
-# 3. The Cognito App Client
-# Connects your Next.js application to the User Pool.
-resource "aws_cognito_user_pool_client" "nextjs_client" {
-  name         = "nextjs-client"
-  user_pool_id = aws_cognito_user_pool.main.id
-
-  # Required for server-side Next.js authentication (like NextAuth or Better Auth)
-  generate_secret = true
-
-  # Allowed Callback URLs
-  callback_urls = [
-    "https://devsandbox.space/api/auth/callback/cognito",
-    # "http://localhost:3000/api/auth/callback/cognito" # Kept for local dev testing
-  ]
-
-  # Allowed Sign-out URLs
-  logout_urls = [
-    "https://devsandbox.space/api/auth-logout",
-    # "http://localhost:3000/api/auth-logout" # Kept for local dev testing
-  ]
-
-  # OAuth 2.0 Settings
-  allowed_oauth_flows_user_pool_client = true
-  allowed_oauth_flows                  = ["code"] # Authorization code grant
-  allowed_oauth_scopes                 = ["openid", "email", "profile", "aws.cognito.signin.user.admin"]
-  
-  # Ensure the default Cognito provider is supported
-  supported_identity_providers         = ["COGNITO"]
-  prevent_user_existence_errors = "ENABLED"
-  enable_token_revocation  = true
-
-  explicit_auth_flows = [
-    "ALLOW_USER_AUTH",
-    "ALLOW_REFRESH_TOKEN_AUTH",
-    "ALLOW_USER_SRP_AUTH"
-  ]
-}
-resource "aws_cognito_user_pool_ui_customization" "main" {
-  client_id    = aws_cognito_user_pool_client.nextjs_client.id
-  user_pool_id = aws_cognito_user_pool_domain.main.user_pool_id
-
-  # Injects modern CSS into the Hosted UI
-  css = <<EOF
-.background-customizable {
-  background-color: #f3f4f6;
-}
-.banner-customizable {
-  padding: 20px;
-  background-color: #ffffff;
-}
-.submitButton-customizable {
-  background-color: #000000;
-  border-radius: 8px;
-}
-.submitButton-customizable:hover {
-  background-color: #333333;
-}
-EOF
-}
-
-
-
-# Fetch the current AWS region automatically
-# data "aws_region" "current" {}
-
-# 1. Cognito User Pool ID
-output "cognito_user_pool_id" {
-  description = "The ID of the Cognito User Pool"
-  value       = aws_cognito_user_pool.main.id
-}
-
-# 2. Cognito App Client ID
-output "cognito_client_id" {
-  description = "The ID of the Cognito App Client"
-  value       = aws_cognito_user_pool_client.nextjs_client.id
-}
-
-# 3. Cognito App Client Secret
-output "cognito_client_secret" {
-  description = "The Secret of the Cognito App Client"
-  value       = aws_cognito_user_pool_client.nextjs_client.client_secret
-  sensitive   = true # Hides the value in the standard CLI output
-}
-
-# 4. Cognito Region
-output "cognito_region" {
-  description = "The AWS region where Cognito is deployed"
-  # value       = data.aws_region.current.name
-  value       = var.region
-}
-
-# 5. Cognito Domain (Fully Qualified URL)
-output "cognito_domain_url" {
-  description = "The full URL of the Cognito Hosted UI domain"
-  # Constructs the standard AWS Cognito domain format required by most Auth libraries
-  value       = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${var.region}.amazoncognito.com"
-}
 
 #---------------------------------------------
 # 8. Route 53 & ACM Certificate (HTTPS)
@@ -996,7 +1021,7 @@ resource "aws_route53_record" "subdomain_alias" {
 #---------------------------------------------
 # resource "aws_ecs_task_definition" "app_task" {
 #   for_each                 = toset(["books", "authors", "dashboard"])
-#   family                   = "rusin-task-${local.env_suffix}"
+#   family                   = "lirwEcr-task-${local.env_suffix}"
 #   # network_mode             = "host"
 #   # network_mode             = "bridge"
 #   network_mode             = "awsvpc"
@@ -1009,7 +1034,7 @@ resource "aws_route53_record" "subdomain_alias" {
 
 #   container_definitions = jsonencode([
 #     {
-#       name      = "rusin"
+#       name      = "lirwEcr"
 #       # image     = "${aws_ecr_repository.app_repo.repository_url}:latest" 
 #       image     = "httpd:2.4-alpine" # Bootstrapping image
 #       essential = true
@@ -1053,7 +1078,7 @@ resource "aws_route53_record" "subdomain_alias" {
   #   dashboard = { port = 3200 }
   # }
 #   for_each         = local.services
-#   family                   = "rusin-task-${each.key}"
+#   family                   = "lirwEcr-task-${each.key}"
 #   # network_mode             = "awsvpc"
 #   network_mode             = "bridge"
 #   # network_mode             = "host"
@@ -1089,8 +1114,8 @@ resource "aws_route53_record" "subdomain_alias" {
 
 # }
 
-resource "aws_ecs_task_definition" "mongodb" {
-  family                   = "nextjs-task-manager-mongodb"
+resource "aws_ecs_task_definition" "backend" {
+  family                   = "lirw-ecr-backend"
   # network_mode             = "bridge"
   network_mode             = "host"
   requires_compatibilities = ["EC2"]
@@ -1099,7 +1124,7 @@ resource "aws_ecs_task_definition" "mongodb" {
 
   # Provisions a local Docker volume on the EC2 host's EBS drive
   volume {
-    name = "mongodb_data_prod"
+    name = "backend_data_prod"
     docker_volume_configuration {
       scope         = "shared"
       autoprovision = true
@@ -1107,7 +1132,7 @@ resource "aws_ecs_task_definition" "mongodb" {
     }
   }
   volume {
-    name = "mongodb_config_prod"
+    name = "backend_config_prod"
     docker_volume_configuration {
       scope         = "shared"
       autoprovision = true
@@ -1117,8 +1142,8 @@ resource "aws_ecs_task_definition" "mongodb" {
 
   container_definitions = jsonencode([
     {
-      name      = "nextjs_task_manager_mongodb"
-      image     = "mongo:7.0"
+      name      = "lirw_ecr_backend"
+      image     = "node:16.0-alpine"
       # image     = var.mongo_image_uri
       essential = true
       
@@ -1128,31 +1153,34 @@ resource "aws_ecs_task_definition" "mongodb" {
       
       portMappings = [
         {
-          containerPort = 27017
-          hostPort      = 27017
+          containerPort = 4000
+          # hostPort      = 27017
           protocol      = "tcp"
         }
       ]
       
       environment = [
-        { name = "MONGO_INITDB_ROOT_USERNAME", value = "admin" },
-        { name = "MONGO_INITDB_DATABASE", value = "task_manager" }
+        { name = "DB_HOST", value = rds.link },
+        { name = "DB_USER", value = "admin-123" }
+        { name = "DB_DATABASE", value = <react_node_app> }
+        { name = "DB_PORT", value = "3306" }
       ]
       
       secrets = [
-        { name = "MONGO_INITDB_ROOT_PASSWORD", valueFrom = aws_secretsmanager_secret.mongodb_root_password.arn }
+        { name = "DB_PASSWORD", valueFrom = aws_secretsmanager_secret.rdsdb_root_password.arn }
       ]
 
       mountPoints = [
         {
-          sourceVolume  = "mongodb_data_prod"
+          sourceVolume  = "backend_data_prod"
           containerPath = "/data/db"
           readOnly      = false
         }
       ]
 
       healthCheck = {
-        command     = ["CMD-SHELL", "echo 'db.runCommand(\"ping\").ok' | mongosh localhost:27017/test --quiet"]
+        # command     = ["CMD-SHELL", "echo 'db.runCommand(\"ping\").ok' | mongosh localhost:27017/test --quiet"]
+        command     = ["CMD-SHELL", "wget --no-verbose --tries=3 --spider http://127.0.0.1:4000/health || exit 1"]
         interval    = 10
         timeout     = 5
         retries     = 5
@@ -1161,7 +1189,7 @@ resource "aws_ecs_task_definition" "mongodb" {
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          "awslogs-group"         = "/ecs/rusin-mongo-${local.env_suffix}"
+          "awslogs-group"         = "/ecs/lirwEcr-backend-${local.env_suffix}"
           "awslogs-region"        = var.region
           "awslogs-stream-prefix" = "ecs"
           "awslogs-create-group": "true",
@@ -1172,7 +1200,7 @@ resource "aws_ecs_task_definition" "mongodb" {
 }
 
 resource "aws_ecs_task_definition" "app" {
-  family                   = "nextjs-task-manager-app"
+  family                   = "lirw-ecr-frontend"
   # network_mode             = "bridge"
   network_mode             = "host"
   requires_compatibilities = ["EC2"]
@@ -1181,7 +1209,7 @@ resource "aws_ecs_task_definition" "app" {
 
   container_definitions = jsonencode([
     {
-      name      = "nextjs_task_manager_app"
+      name      = "lirw_ecr_frontend"
       image     = var.app_image_uri
       essential = true
       memory    = var.app_memory
@@ -1189,34 +1217,23 @@ resource "aws_ecs_task_definition" "app" {
       
       portMappings = [
         {
-          containerPort = 3000
+          containerPort = 80
           # hostPort      = 3000
           protocol      = "tcp"
         }
       ]
 
       environment = [
-        { name = "NODE_ENV", value = local.env_suffix },
-        { name = "NEXT_PUBLIC_APP_URL", value = "https://${var.domain_name}" },
-        { name = "BETTER_AUTH_URL", value = "https://${var.domain_name}" },
-        { name = "COGNITO_DOMAIN", value = "${aws_cognito_user_pool_domain.main.domain}.auth.${var.region}.amazoncognito.com" },
-        { name = "COGNITO_REGION", value = var.region },
-        { name = "COGNITO_USER_POOL_ID", value = aws_cognito_user_pool.main.id }
+        { name = "BACKEND_ALB_URL", value = aws_lb.backend_internal.dns_name },
+        { name = "VITE_API_URL", value = "/api" },
         
-      ]
-
-      secrets = [
-        { name = "BETTER_AUTH_SECRET", valueFrom = aws_ssm_parameter.better_auth_secret.arn },
-        { name = "MONGODB_URI", valueFrom = aws_secretsmanager_secret.mongodb_uri.arn },
-        { name = "COGNITO_CLIENT_ID", valueFrom = aws_ssm_parameter.cognito_client_id.arn },
-        { name = "COGNITO_CLIENT_SECRET", valueFrom = aws_ssm_parameter.cognito_client_secret.arn }
       ]
 
       healthCheck = {
         # curl command is missing in alpine linux
         # command     = ["CMD-SHELL", "curl -f http://localhost:3000 || exit 1"]
         # Using wget (native to Alpine), 127.0.0.1 (forces IPv4), and the new lightweight endpoint
-        command     = ["CMD-SHELL", "wget --no-verbose --tries=3 --spider http://127.0.0.1:3000/api/health || exit 1"]
+        command     = ["CMD-SHELL", "wget --no-verbose --tries=3 --spider http://127.0.0.1:80/health || exit 1"]
         interval    = 30
         timeout     = 10
         retries     = 3
@@ -1227,7 +1244,7 @@ resource "aws_ecs_task_definition" "app" {
         logDriver = "awslogs"
         options = {
           # "awslogs-group"         = "/aws/ec2/nextjs-task-manager-app"
-          "awslogs-group"         = "/ecs/rusin-app-${local.env_suffix}"
+          "awslogs-group"         = "/ecs/lirwEcr-frontend-${local.env_suffix}"
           "awslogs-region"        = var.region
           "awslogs-stream-prefix" = "ecs"
           "awslogs-create-group": "true"
@@ -1240,7 +1257,7 @@ resource "aws_ecs_task_definition" "app" {
 # 11. ECS Service
 #---------------------------------------------
 # resource "aws_ecs_service" "app_service" {
-#   name             = "rusin-service-${local.env_suffix}"
+#   name             = "lirwEcr-service-${local.env_suffix}"
 #   cluster          = aws_ecs_cluster.app_cluster.id
 #   task_definition  = aws_ecs_task_definition.app_task.arn
 #   desired_count    = var.desired_count
@@ -1269,7 +1286,7 @@ resource "aws_ecs_task_definition" "app" {
 
 #   load_balancer {
 #     target_group_arn = aws_lb_target_group.app_tg.arn
-#     container_name   = "rusin"
+#     container_name   = "lirwEcr"
 #     container_port   = 3200
 #   }
 
@@ -1313,7 +1330,7 @@ resource "aws_ecs_task_definition" "app" {
 #   load_balancer {
 #     # Assuming your target groups are named similarly: dashboard-tg, books-tg, etc.
 #     target_group_arn = aws_lb_target_group.app_tg[each.key].arn
-#     container_name   = "rusin-${each.key}" # Matches the name in your JSON template
+#     container_name   = "lirwEcr-${each.key}" # Matches the name in your JSON template
 #     container_port   = each.value.port
 #   }
 
@@ -1336,8 +1353,8 @@ resource "aws_ecs_task_definition" "app" {
 
 
 # The Internal Network Load Balancer
-resource "aws_lb" "mongodb_internal" {
-  name               = "mongodb-internal-nlb"
+resource "aws_lb" "backend_internal" {
+  name               = "backend-internal-nlb-${local.env_suffix}"
   internal           = true
   load_balancer_type = "network"
   enable_cross_zone_load_balancing = true
@@ -1348,27 +1365,27 @@ resource "aws_lb" "mongodb_internal" {
 
   # AWS recently added Security Group support for NLBs. 
   # This ensures only your App tier can talk to the database tier.
-  security_groups    = [aws_security_group.mongodb_nlb.id]
+  security_groups    = [aws_security_group.internal_alb_sg.id]
 }
 
 # The TCP Listener
-resource "aws_lb_listener" "mongodb" {
-  load_balancer_arn = aws_lb.mongodb_internal.arn
-  port              = "27017"
+resource "aws_lb_listener" "backend_listener" {
+  load_balancer_arn = aws_lb.backend_internal.arn
+  port              = "4000"
   protocol          = "TCP"
 
   default_action {
     type             = "forward"
     # This references the target group we created in the previous step
-    target_group_arn = aws_lb_target_group.mongodb_internal.arn 
+    target_group_arn = aws_lb_target_group.backend_internal.arn
   }
 }
 
 # mongo db and internal alb terraform
 # The Target Group for the Internal NLB (TCP Traffic)
-resource "aws_lb_target_group" "mongodb_internal" {
-  name     = "mongodb-internal-tg"
-  port     = 27017
+resource "aws_lb_target_group" "backend_internal" {
+  name     = "backend-internal-tg"
+  port     = 4000
   protocol = "TCP" # Crucial for MongoDB
   vpc_id   = aws_vpc.vpc.id
   # target_type = "ip" # Must be 'ip' when using awsvpc network mode
@@ -1380,6 +1397,7 @@ resource "aws_lb_target_group" "mongodb_internal" {
   # Health check using TCP to ensure the port is open
   health_check {
     protocol            = "TCP"
+    path = "/health"
     port                = "traffic-port"
     healthy_threshold   = 3
     unhealthy_threshold = 3
@@ -1387,65 +1405,19 @@ resource "aws_lb_target_group" "mongodb_internal" {
   }
 }
 
-# Security Group for the Internal NLB
-resource "aws_security_group" "mongodb_nlb" {
-  name        = "mongodb-nlb-sg"
-  description = "Allow App tier to reach MongoDB NLB"
-  vpc_id      = aws_vpc.vpc.id
-
-  ingress {
-    description     = "MongoDB from App Tier"
-    from_port       = 27017
-    to_port         = 27017
-    protocol        = "tcp"
-    # Only allow traffic originating from the Next.js App's Security Group
-    security_groups = [aws_security_group.ecs_node_sg.id] 
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-# Add an Ingress rule to your EC2 Host Security Group 
-# to allow the NLB to forward traffic to the containers
-# resource "aws_security_group_rule" "ec2_mongodb_ingress" {
-#   type                     = "ingress"
-#   from_port                = 27017
-#   to_port                  = 27017
-#   protocol                 = "tcp"
-#   security_group_id        = aws_security_group.ecs_node_sg.id
-#   source_security_group_id = aws_security_group.mongodb_nlb.id
-# }
-# # Allow EC2 nodes to communicate with each other on the MongoDB port
-# # This is required because the NLB preserves the original Client IP
-# resource "aws_security_group_rule" "ecs_node_self_mongo" {
-#   type                     = "ingress"
-#   from_port                = 27017
-#   to_port                  = 27017
-#   protocol                 = "tcp"
-#   security_group_id        = aws_security_group.ecs_node_sg.id
-  
-#   # The SG references itself!
-#   source_security_group_id = aws_security_group.ecs_node_sg.id 
-#   description              = "Mongo ingress via NLB Client IP Preservation"
-# }
 # The MongoDB ECS Service
-resource "aws_ecs_service" "mongodb" {
-  name            = "mongodb-service"
+resource "aws_ecs_service" "backend" {
+  name            = "backend-service"
   cluster         = aws_ecs_cluster.app_cluster.id # Replace with your cluster ID
-  task_definition = aws_ecs_task_definition.mongodb.arn
+  task_definition = aws_ecs_task_definition.backend.arn
   desired_count   = var.desired_count
   # launch_type     = "EC2"
 
   # Attach the service to the NLB Target Group
   load_balancer {
-    target_group_arn = aws_lb_target_group.mongodb_internal.arn
-    container_name   = "nextjs_task_manager_mongodb"
-    container_port   = 27017
+    target_group_arn = aws_lb_target_group.backend_internal.arn
+    container_name   = "lirw_ecr_backend"
+    container_port   = 4000
   }
 
 
@@ -1472,7 +1444,7 @@ resource "aws_ecs_service" "mongodb" {
   }
 
   depends_on = [
-    aws_lb_listener.mongodb,
+    aws_lb_listener.backend_listener,
     aws_ecs_cluster_capacity_providers.cluster_attach
   ]
 
@@ -1483,7 +1455,7 @@ resource "aws_ecs_service" "mongodb" {
 }
 
 resource "aws_lb" "app_alb" {
-  name               = "alb-${local.env_suffix}"
+  name               = "frontend-public-alb-${local.env_suffix}"
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb_sg.id]
@@ -1528,7 +1500,7 @@ resource "aws_lb_listener" "app_listener_https_secure" {
 # The Target Group for the External ALB (HTTP Traffic)
 resource "aws_lb_target_group" "app_external" {
   name     = "nextjs-app-tg"
-  port     = 3000
+  port     = 80
   protocol = "HTTP"
   vpc_id   = aws_vpc.vpc.id
     # target_type = "ip" # Must be 'ip' when using awsvpc network mode
@@ -1536,13 +1508,13 @@ resource "aws_lb_target_group" "app_external" {
   # ADD THIS LINE: Lower the wait time from 5 minutes to 30 seconds
   deregistration_delay = 30
 
-  stickiness {
-    type            = "lb_cookie"
-    cookie_duration = 86400 # How long the stickiness lasts (in seconds). 86400 = 1 day.
-    enabled         = true
-  }
+  # stickiness {
+  #   type            = "lb_cookie"
+  #   cookie_duration = 86400 # How long the stickiness lasts (in seconds). 86400 = 1 day.
+  #   enabled         = true
+  # }
   health_check {
-    path                = "/api/health" # Or a dedicated /api/health route
+    path                = "/health" # Or a dedicated /api/health route
     protocol            = "HTTP"
     healthy_threshold   = 5
     unhealthy_threshold = 3
@@ -1554,7 +1526,7 @@ resource "aws_lb_target_group" "app_external" {
 
 # The Next.js App ECS Service
 resource "aws_ecs_service" "app" {
-  name            = "nextjs-app-service"
+  name            = "frontend-service"
   cluster         = aws_ecs_cluster.app_cluster.id # Replace with your cluster ID
   task_definition = aws_ecs_task_definition.app.arn
   desired_count   = 2 # Assuming you want high availability
@@ -1564,8 +1536,8 @@ resource "aws_ecs_service" "app" {
   # Attach the service to the ALB Target Group
   load_balancer {
     target_group_arn = aws_lb_target_group.app_external.arn
-    container_name   = "nextjs_task_manager_app"
-    container_port   = 3000
+    container_name   = "lirw_ecr_frontend"
+    container_port   = 80
   }
 
   timeouts {
@@ -1605,22 +1577,40 @@ resource "aws_ecs_service" "app" {
 #---------------------------------------------
 # 12. Application Auto Scaling (Task Level)
 #---------------------------------------------
-# no need to scale mongo db container
+
+
+# Auto-scale tasks based on CPU Utilization
+
 resource "aws_appautoscaling_target" "ecs_target" {
-  max_capacity       = 10
-  min_capacity       = 2
-  resource_id        = "service/${aws_ecs_cluster.app_cluster.name}/${aws_ecs_service.app.name}"
+  for_each = {
+    frontend = {
+      min  = 2
+      max  = 10
+      name = aws_ecs_service.app.name      # Links to your frontend service
+    }
+    backend = {
+      min  = 2
+      max  = 10
+      name = aws_ecs_service.backend.name  # Links to your backend service
+    }
+  }
+
+  max_capacity       = each.value.max
+  min_capacity       = each.value.min
+  resource_id        = "service/${aws_ecs_cluster.app_cluster.name}/${each.value.name}"
   scalable_dimension = "ecs:service:DesiredCount"
   service_namespace  = "ecs"
 }
 
-# Auto-scale tasks based on CPU Utilization
+
 resource "aws_appautoscaling_policy" "ecs_policy_cpu" {
-  name               = "rusin-cpu-autoscaling-${local.env_suffix}"
+  for_each = aws_appautoscaling_target.ecs_target # Automatically loops through both
+
+  name               = "${each.key}-cpu-autoscaling-${local.env_suffix}"
   policy_type        = "TargetTrackingScaling"
-  resource_id        = aws_appautoscaling_target.ecs_target.resource_id
-  scalable_dimension = aws_appautoscaling_target.ecs_target.scalable_dimension
-  service_namespace  = aws_appautoscaling_target.ecs_target.service_namespace
+  resource_id        = each.value.resource_id
+  scalable_dimension = each.value.scalable_dimension
+  service_namespace  = each.value.service_namespace
 
   target_tracking_scaling_policy_configuration {
     predefined_metric_specification {

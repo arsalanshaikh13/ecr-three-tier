@@ -7,3 +7,4 @@ task-defini*.json
 .gitlab-ci.yml
 *.pem
 cluster.sh
+lirw-ecr/**

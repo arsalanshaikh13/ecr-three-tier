@@ -4,42 +4,106 @@ on:
   push:
     branches:
       - main
-      - fargate
     paths:
-      - "rusinnextjs/**"
+      - "lirw-three-tier/frontend/**"
+      - "lirw-three-tier/backend/**"
       - ".github/workflows/**"
   workflow_dispatch:
     inputs:
-      skip_build:
-        description: "Skip Docker Build & Push?"
+      build_frontend:
+        description: "Build & Deploy Frontend?"
         type: boolean
         required: true
         default: true
+      build_backend:
+        description: "Build & Deploy Backend?"
+        type: boolean
+        required: true
+        default: true
+      run_seeding:
+        description: "Build Seeder & Seed Database?"
+        type: boolean
+        required: true
+        default: false
 
 env:
   AWS_REGION: us-east-1
-  ECR_REPOSITORY: rusin-nextjs-app-repo-dev
-  ECS_SERVICE: nextjs-app-service
-  ECS_CLUSTER: ecs-cluster-dev
-  ECS_TASK_DEFINITION: task-definition.json
-  CONTAINER_NAME: nextjs_task_manager_app
+  # These are prefixes. The matrix will append '-frontend' or '-backend' to them
+  ECS_CLUSTER: app_cluster
   DOMAIN_NAME: devsandbox.space
-  USER_POOL: nextjs-task-manager-pool
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  deploy:
-    name: Deploy to ECS
+  # ---------------------------------------------------------
+  # 1. DETECT CHANGES (Path Filtering)
+  # ---------------------------------------------------------
+  detect-changes:
+    name: Detect Changed Paths & Setup Matrix
     runs-on: ubuntu-latest
+    outputs:
+      # We output the JSON array string here
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            frontend:
+              - 'lirw-three-tier/frontend/**'
+            backend:
+              - 'lirw-three-tier/backend/**'
+
+      - name: Calculate Dynamic Matrix
+        id: set-matrix
+        run: |
+          COMPONENTS=()
+
+          # Check logic for a push event
+          if [ "${{ github.event_name }}" == "push" ]; then
+            if [ "${{ steps.filter.outputs.frontend }}" == "true" ]; then COMPONENTS+=("frontend"); fi
+            if [ "${{ steps.filter.outputs.backend }}" == "true" ]; then COMPONENTS+=("backend"); fi
+
+          # Check logic for a manual trigger
+          elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            if [ "${{ inputs.build_frontend }}" == 'true' ]; then COMPONENTS+=("frontend"); fi
+            if [ "${{ inputs.build_backend }}" == 'true' ]; then COMPONENTS+=("backend"); fi
+          fi
+
+          # Convert the bash array into a JSON array using jq
+          if [ ${#COMPONENTS[@]} -eq 0 ]; then
+            MATRIX_JSON="[]"
+          else
+            MATRIX_JSON=$(printf '%s\n' "${COMPONENTS[@]}" | jq -R . | jq -s -c .)
+          fi
+
+          echo "Calculated Matrix: $MATRIX_JSON"
+          echo "matrix=$MATRIX_JSON" >> $GITHUB_OUTPUT
+  # ---------------------------------------------------------
+  # 2. BUILD & DEPLOY (Matrix for Frontend / Backend)
+  # ---------------------------------------------------------
+  build-and-deploy:
+    name: Build & Deploy ${{ matrix.component }}
+    needs: detect-changes
+    # CRITICAL: If the array is empty, skip this job entirely to prevent matrix errors
+    if: ${{ needs.detect-changes.outputs.matrix != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # This dynamically loads the array we built in the previous job
+        component: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials via OIDC
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ vars.ACCOUNT_ID }}:role/GitHubActions-ECS-DeployRole
@@ -49,125 +113,91 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # ---------------------------------------------------------
-      # NEW STEP: Dynamically Fetch Cognito Values via AWS CLI
-      # ---------------------------------------------------------
-      - name: Fetch Cognito Details
-        id: fetch-cognito
-        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.skip_build == true) }}
-        run: |
-          # 1. Get User Pool ID by finding the pool with your exact name
-          # REPLACE 'YOUR_USER_POOL_NAME' with your actual pool name from Terraform!
-          USER_POOL_NAME=${{ env.USER_POOL }}
-          USER_POOL_ID=$(aws cognito-idp list-user-pools --max-results 60 --query "UserPools[?Name=='$USER_POOL_NAME'].Id" --output text)
-
-          if [ -z "$USER_POOL_ID" ] || [ "$USER_POOL_ID" == "None" ]; then
-            echo "Error: Could not find User Pool with name $USER_POOL_NAME"
-            exit 1
-          fi
-
-          # 2. Get the first App Client ID attached to this User Pool
-          CLIENT_ID=$(aws cognito-idp list-user-pool-clients --user-pool-id $USER_POOL_ID --max-results 10 --query "UserPoolClients[0].ClientId" --output text)
-
-          # 3. Get the Domain Prefix to construct the full Cognito Domain URL
-          DOMAIN_PREFIX=$(aws cognito-idp describe-user-pool --user-pool-id $USER_POOL_ID --query "UserPool.Domain" --output text)
-          COGNITO_DOMAIN="https://${DOMAIN_PREFIX}.auth.${{ env.AWS_REGION }}.amazoncognito.com"
-
-          echo "✅ Found Client ID: $CLIENT_ID"
-          echo "✅ Found Domain: $COGNITO_DOMAIN"
-
-          # 4. Save to GitHub Env so the Docker step can access them
-          echo "NEXT_PUBLIC_COGNITO_CLIENT_ID=$CLIENT_ID" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_COGNITO_DOMAIN=$COGNITO_DOMAIN" >> $GITHUB_ENV
-
-      # ---------------------------------------------------------
-      # NEW STEP: Fetch Secrets securely
-      # ---------------------------------------------------------
-      #   - name: Fetch MongoDB URI from Secrets Manager
-      #     id: fetch-secrets
-      #     run: |
-      #       # Fetch the secret string from AWS
-      #       MONGO_URI=$(aws secretsmanager get-secret-value --secret-id /nextjs-task-manager/prod/mongodb-uri --query SecretString --output text)
-
-      #       # CRITICAL: Mask the secret so it never prints in GitHub Action logs
-      #       echo "::add-mask::$MONGO_URI"
-
-      #       # Pass it as an output to the next step
-      #       echo "MONGO_URI=$MONGO_URI" >> $GITHUB_OUTPUT
-
-      # ---------------------------------------------------------
-      # FIXED: Consolidated Build & Push
-      # ---------------------------------------------------------
-
       - name: Build, tag, and push image to Amazon ECR
         id: build-image
-        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.skip_build == true) }}
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          # Dynamically set repository based on matrix component
+          ECR_REPOSITORY: lirw-ecr-${{ matrix.component }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          cd rusinnextjs
+          cd lirw-three-tier/${{ matrix.component }}
 
-          # Pass the dummy URI so the build bypasses the database connection
           docker build \
-            --build-arg NEXT_PUBLIC_APP_URL=https://${{ env.DOMAIN_NAME }} \
-            --build-arg MONGODB_URI=mongodb://build-time-dummy \
-            --build-arg NEXT_PUBLIC_COGNITO_DOMAIN=${{ env.NEXT_PUBLIC_COGNITO_DOMAIN }} \
-            --build-arg NEXT_PUBLIC_COGNITO_CLIENT_ID=${{ env.NEXT_PUBLIC_COGNITO_CLIENT_ID }} \
             -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
             .
             
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-      - name: Determine Image URI (Fetch from ECR)
-        id: determine-image
-        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.skip_build == true) }}
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          REPO_NAME: ${{ env.ECR_REPOSITORY }}
-        run: |
-          # 1. If the user left the input as 'latest', dynamically fetch the most recent tag from ECR
-          echo "🔍 Fetching the most recently pushed image tag from ECR for $REPO_NAME..."
-
-          # AWS CLI command to get the latest pushed image tag
-          FETCHED_TAG=$(aws ecr describe-images \
-            --repository-name $REPO_NAME \
-            --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags[0]' \
-            --output text)
-
-          # Safety check: ensure we actually found a tag
-          if [ "$FETCHED_TAG" == "None" ] || [ -z "$FETCHED_TAG" ]; then
-            echo "❌ Error: Could not find any images in ECR repository $REPO_NAME"
-            exit 1
-          fi
-
-          echo "✅ Found latest image tag: $FETCHED_TAG"
-          echo "final_image=$ECR_REGISTRY/$REPO_NAME:$FETCHED_TAG" >> $GITHUB_OUTPUT
-
-      # ---------------------------------------------------------
-      # FIXED: Correct Task Definition Fetch
-      # ---------------------------------------------------------
       - name: Download current ECS task definition
+        env:
+          TASK_DEF_NAME: ${{ matrix.component }}-task-definition
         run: |
           aws ecs describe-task-definition \
-            --task-definition nextjs-task-manager-app \
-            --query taskDefinition > ${{ env.ECS_TASK_DEFINITION }}
+            --task-definition $TASK_DEF_NAME \
+            --query taskDefinition > task-definition-${{ matrix.component }}.json
 
       - name: Fill in the new image ID in the Amazon ECS task definition
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: ${{ env.ECS_TASK_DEFINITION }}
-          container-name: ${{ env.CONTAINER_NAME }}
-          image: ${{ steps.build-image.outputs.image || steps.determine-image.outputs.final_image }}
+          task-definition: task-definition-${{ matrix.component }}.json
+          container-name: lirw_ecr_${{ matrix.component }}
+          image: ${{ steps.build-image.outputs.image }}
 
       - name: Deploy Amazon ECS task definition
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.task-def.outputs.task-definition }}
-          service: ${{ env.ECS_SERVICE }}
+          service: ${{ matrix.component }}-service
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
+
+  # ---------------------------------------------------------
+  # 3. DB SEEDING (Manual Only)
+  # ---------------------------------------------------------
+  seed-database:
+    name: Build & Run DB Seeder
+    runs-on: ubuntu-latest
+    # ONLY runs on workflow dispatch AND if run_seeding is explicitly checked
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_seeding == true }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.ACCOUNT_ID }}:role/GitHubActions-ECS-DeployRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and Push Seeder Image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: lirw-ecr-backend # Reusing backend repo for seeder tag
+        run: |
+          cd lirw-three-tier/database-seeder # Adjust path to your seeder Dockerfile
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:seeder-latest .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:seeder-latest
+
+      - name: Trigger ECS Run-Task for Seeding
+        run: |
+          aws ecs run-task \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --task-definition db-seeder \
+            --launch-type EC2 \
+            --network-configuration '{
+              "awsvpcConfiguration": {
+                "subnets": ["${{ secrets.PRIVATE_SUBNET_3A }}", "${{ secrets.PRIVATE_SUBNET_4B }}"],
+                "securityGroups": ["${{ secrets.BACKEND_SG_ID }}"]
+              }
+            }'
