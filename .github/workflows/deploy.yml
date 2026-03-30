@@ -316,10 +316,9 @@ jobs:
               "containerOverrides": [
                 {
                   "name": "mysql-seeder",
-                  "environment": [
-                    { "name": "DB_HOST", "value": "${{ steps.fetch-db-credentials.outputs.db_address }}" }
-                     ],
-                  "secrets": [
+                  
+                    "secrets": [
+                      { "name": "DB_HOST", "value": "${{ steps.fetch-db-credentials.outputs.db_address }}" },
                       { "name": "DB_PASSWORD", "value": "${{ steps.fetch-db-credentials.outputs.db_password }}" }
                     ]
                   ]
