@@ -291,7 +291,7 @@ jobs:
         id: fetch-db-credentials
         run: |
           # 1. Fetch DB Address from SSM Parameter Store
-          DB_ADDRESS=$(aws ssm get-parameter --name "/ecs/${{ vars.ENV_VAR }}/rds_db_address" --query "Parameter.Value" --output text)
+          DB_ADDRESS=$(aws ssm get-parameter --name "/lirw-ecr/${{ vars.ENV_VAR }}/rds_db_address" --query "Parameter.Value" --output text)
 
           # 2. Fetch Password from Secrets Manager
           # If your secret is JSON, you might need to parse it with jq. 
