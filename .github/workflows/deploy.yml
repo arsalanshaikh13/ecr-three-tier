@@ -311,11 +311,6 @@ jobs:
             --cluster ${{ env.ECS_CLUSTER }} \
             --task-definition ${{ steps.register-task-def.outputs.task_def_arn }} \
             --launch-type EC2 \
-            --network-configuration '{
-              "awsvpcConfiguration": {
-                "subnets": ${{ steps.lookup.outputs.subnets }},
-                "securityGroups": ["${{ steps.lookup.outputs.sg_id }}"]
-              }
             }' \
             --overrides '{
               "containerOverrides": [
