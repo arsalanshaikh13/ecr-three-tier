@@ -275,7 +275,7 @@ jobs:
 
           # 2. Look up the Private Subnets by their Name tags
           SUBNETS=$(aws ec2 describe-subnets \
-            --filters "Name=tag:Name,Values=*pri_sub_*" \
+            --filters "Name=tag:Name,Values=pri-sub-*" \
             --query 'Subnets[*].SubnetId' \
             --output json | tr -d '\n' | tr -d ' ')
             
