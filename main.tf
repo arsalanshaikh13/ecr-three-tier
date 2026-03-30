@@ -24,7 +24,24 @@ resource "aws_ecr_repository" "app_repos" {
   }
 
   tags = merge(local.common_tags, { 
-    Name = "ecr-lirwEcr-${local.env_suffix}" 
+    Name = "ecr-lirwEcr-${each.key}-repo-${local.env_suffix}" 
+  })
+}
+resource "aws_ecr_repository" "db_repo" {
+  name                 = "lirw-ecr-database-seed-repo-${local.env_suffix}"
+  image_tag_mutability = "IMMUTABLE"
+  force_delete         = true
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+  
+  encryption_configuration {
+    encryption_type = "AES256"
+  }
+
+  tags = merge(local.common_tags, { 
+    Name = "ecr-lirwEcr--db-repo-${local.env_suffix}" 
   })
 }
 

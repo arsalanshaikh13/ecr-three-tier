@@ -134,7 +134,7 @@ jobs:
 
       - name: Download current ECS task definition
         env:
-          TASK_DEF_NAME: ${{ matrix.component }}-task-definition
+          TASK_DEF_NAME: lirw-ecr-${{ matrix.component }}
         run: |
           aws ecs describe-task-definition \
             --task-definition $TASK_DEF_NAME \
