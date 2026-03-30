@@ -269,7 +269,7 @@ jobs:
         run: |
           # 1. Look up the Backend Security Group by its Name tag
           SG_ID=$(aws ec2 describe-security-groups \
-            --filters "Name=tag:Name,Values=ecs-node-backend-sg-${{ vars.ENV_VAR }}" \
+            --filters "Name=group-name,Values=ecs-node-backend-sg-${{ vars.ENV_VAR }}" \
             --query "SecurityGroups[0].GroupId" \
             --output text)
 
