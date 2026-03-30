@@ -287,41 +287,10 @@ jobs:
           echo "sg_id=$SG_ID" >> $GITHUB_OUTPUT
           echo "subnets=$SUBNETS" >> $GITHUB_OUTPUT
 
-      - name: Fetch DB Address and Password
-        id: fetch-db-credentials
-        run: |
-          # 1. Fetch DB Address from SSM Parameter Store
-          DB_ADDRESS=$(aws ssm get-parameter --name "/lirw-ecr/${{ vars.ENV_VAR }}/rds_db_address" --with-decryption --query "Parameter.Value" --output text)
-
-          # 2. Fetch Password from Secrets Manager
-          # If your secret is JSON, you might need to parse it with jq. 
-          # Assuming it's just a raw string here:
-          DB_PASSWORD=$(aws secretsmanager get-secret-value --secret-id "/lirw-ecr/${{ vars.ENV_VAR }}/rds-root-password" --query "SecretString" --output text)
-
-          # 3. CRITICAL SECURITY STEP: Mask the password in GitHub Actions logs
-          echo "::add-mask::$DB_PASSWORD"
-
-          # 4. Save to GitHub Outputs so the next step can use them
-          echo "db_address=$DB_ADDRESS" >> $GITHUB_OUTPUT
-          echo "db_password=$DB_PASSWORD" >> $GITHUB_OUTPUT
-
       - name: Trigger ECS Run-Task for Seeding
         run: |
           aws ecs run-task \
             --cluster ${{ env.ECS_CLUSTER }} \
             --task-definition ${{ steps.register-task-def.outputs.task_def_arn }} \
-            --launch-type EC2 \
-            }' \
-            --overrides '{
-              "containerOverrides": [
-                {
-                  "name": "mysql-seeder",
-                  
-                    "secrets": [
-                      { "name": "DB_HOST", "value": "${{ steps.fetch-db-credentials.outputs.db_address }}" },
-                      { "name": "DB_PASSWORD", "value": "${{ steps.fetch-db-credentials.outputs.db_password }}" }
-                    ]
-                  ]
-                }
-              ]
-            }'
+            --launch-type EC2 
+
