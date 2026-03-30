@@ -190,6 +190,7 @@ resource "aws_iam_policy" "ecs_task_secrets_policy" {
         # Ensure it can read your specific SSM Parameters
         Resource = [
           aws_ssm_parameter.rds_db_address.arn,
+          
         ]
       }
     
