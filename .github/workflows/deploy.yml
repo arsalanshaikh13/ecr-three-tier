@@ -117,7 +117,7 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           # Dynamically set repository based on matrix component
-          ECR_REPOSITORY: lirw-ecr-${{ matrix.component }}
+          ECR_REPOSITORY: lirw-ecr-${{ matrix.component }}-${{ vars.ENV_VAR }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
           cd lirw-three-tier/${{ matrix.component }}
@@ -189,7 +189,7 @@ jobs:
           cd lirw-three-tier/database-seeder
 
           # Build and push with a unique tag AND the latest tag
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:seeder-latest .
+          docker build --file=db.dockerfile -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:seeder-latest .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:seeder-latest
 
