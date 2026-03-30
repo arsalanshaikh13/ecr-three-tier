@@ -43,17 +43,33 @@ variable "app_memory" {
   type        = number
   default     = 1024
 }
-variable "mongo_cpu" {
+variable "db_cpu" {
   description = "CPU units for the ECS task definition"
   type        = number
   default     = 1024
 }
 
-variable "mongo_memory" {
+variable "db_memory" {
   description = "Memory in MB for the ECS task definition"
   type        = number
   default     = 2048
 }
+variable "db_username" {
+  description = "Memory in MB for the ECS task definition"
+  type        = string
+  default     = "admin-123"
+}
+variable "db_name" {
+  description = "Memory in MB for the ECS task definition"
+  type        = string
+  default     = "lirw-ecr-db"
+}
+# variable "db_password" {
+#   description = "Memory in MB for the ECS task definition"
+#   type        = string
+#   sensitive = true
+# }
+
 variable "app_memory_soft_limit" {
   description = "Memory in MB for the ECS task definition"
   type        = number

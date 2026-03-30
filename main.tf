@@ -6,12 +6,12 @@
 # 1. ECR Repository (Immutable + Lifecycle)
 #---------------------------------------------
 locals {
-  ecr_names = toset(["frontend", "backend"])
+  ecr_names = toset(["frontend", "backend", "database-seeder"])
 }
 
 resource "aws_ecr_repository" "app_repos" {
   for_each = local.ecr_names
-  name                 = "lirwEcr-${each.key}-repo-${local.env_suffix}"
+  name                 = "lirw-ecr-${each.key}-repo-${local.env_suffix}"
   image_tag_mutability = "IMMUTABLE"
   force_delete         = true
 
@@ -29,9 +29,10 @@ resource "aws_ecr_repository" "app_repos" {
 }
 
 resource "aws_ecr_lifecycle_policy" "app_repo_lifecycle" {
-  # for_each   = aws_ecr_repository.app_repos
+    for_each = local.ecr_names
+
   # repository = each.value.name # References the name from the repo loop above
-  repository = aws_ecr_repository.app_repos.name # References the name from the repo loop above
+  repository = aws_ecr_repository.app_repos[each.key].name # References the name from the repo loop above
 
   policy = jsonencode({
     rules = [{
@@ -131,10 +132,7 @@ resource "aws_iam_role_policy_attachment" "ecs_node_role_ec2" {
   role       = aws_iam_role.ecs_node_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
 }
-resource "aws_iam_role_policy_attachment" "ecs_node_role_cognito" {
-  role       = aws_iam_role.ecs_node_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonCognitoPowerUser"
-}
+
 resource "aws_iam_role_policy_attachment" "ecs_node_role_exec" {
   role       = aws_iam_role.ecs_node_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
@@ -162,8 +160,7 @@ resource "aws_iam_policy" "ecs_task_secrets_policy" {
                   ]
         Effect   = "Allow"
         Resource = [
-                    aws_secretsmanager_secret.rdsdb_root_password.arn,
-                    aws_secretsmanager_secret.mongodb_uri.arn
+                    aws_secretsmanager_secret.rdsdb_root_password.arn
                   ]
     },
     {
@@ -175,9 +172,7 @@ resource "aws_iam_policy" "ecs_task_secrets_policy" {
         ]
         # Ensure it can read your specific SSM Parameters
         Resource = [
-          aws_ssm_parameter.better_auth_secret.arn,
-          aws_ssm_parameter.cognito_client_id.arn,
-          aws_ssm_parameter.cognito_client_secret.arn
+          aws_ssm_parameter.rds_db_address.arn,
         ]
       }
     
@@ -227,37 +222,6 @@ resource "aws_iam_role_policy_attachment" "ecs_metadata_attach_exec" {
   policy_arn = aws_iam_policy.ecs_metadata_policy.arn
 }
 
-# 1. Create the policy that grants Admin access to your specific User Pool to update usernamae and password
-resource "aws_iam_policy" "ecs_cognito_admin_policy" {
-  name        = "ecsCognitoAdminPolicy-dev" # or use your local.env_suffix
-  description = "Allows the Next.js backend to manage Cognito users"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid      = "AllowCognitoAdminActions"
-        Effect   = "Allow"
-        Action   = [
-          "cognito-idp:AdminUpdateUserAttributes",
-          "cognito-idp:AdminSetUserPassword",
-          "cognito-idp:AdminGetUser",
-          "cognito-idp:AdminDeleteUser" # Added in case you build a "Delete Account" button!
-        ]
-        # Restrict this power ONLY to your specific User Pool
-        Resource = aws_cognito_user_pool.main.arn 
-      }
-    ]
-  })
-}
-
-# 2. Attach the policy to your ECS Task Role
-resource "aws_iam_role_policy_attachment" "ecs_cognito_admin_attach" {
-  role       = aws_iam_role.ecs_task_role.name
-  policy_arn = aws_iam_policy.ecs_cognito_admin_policy.arn
-}
-
-
 
 
 # 2. Create the policy that allows the container to open a terminal
@@ -302,54 +266,36 @@ resource "aws_iam_role_policy_attachment" "ecs_exec_attachment" {
 #---------------------------------------------
 
 
-resource "aws_ssm_parameter" "better_auth_secret" {
-  name        = "/nextjs-task-manager/prod/better-auth-secret"
-  description = "Secret key for Next.js Better Auth"
+resource "aws_ssm_parameter" "rds_db_address" {
+  name        = "/lirw-ecr/dev/rds_db_address"
+  description = "database dns address"
   type        = "SecureString"
-  value       = "REPLACE_ME_IN_CONSOLE"
+  value       = aws_db_instance.mysql_db.address
 
   # lifecycle {
   #   ignore_changes = [value]
   # }
 }
-# 1. Cognito Client ID (Stored in SSM)
-resource "aws_ssm_parameter" "cognito_client_id" {
-  name        = "/nextjs-task-manager/prod/cognito-client-id"
-  description = "AWS Cognito Client ID"
-  type        = "SecureString"
-  
-  # Directly references the created Cognito Client
-  value       = aws_cognito_user_pool_client.nextjs_client.id
-}
 
-# 2. Cognito Client Secret (Stored in SSM)
-resource "aws_ssm_parameter" "cognito_client_secret" {
-  name        = "/nextjs-task-manager/prod/cognito-client-secret"
-  description = "AWS Cognito Client Secret"
-  type        = "SecureString"
-  
-  # Directly references the generated secret
-  value       = aws_cognito_user_pool_client.nextjs_client.client_secret
-}
 
 # MongoDB Root Password
 # We generate a random, secure password for the database via Terraform
-resource "random_password" "mongodb_password" {
+resource "random_password" "db_password" {
   length  = 16
   special = false
 }
 resource "aws_secretsmanager_secret" "rdsdb_root_password" {
-  name        = "/lirw-ecr/prod/rds-root-password"
+  name        = "/lirw-ecr/dev/rds-root-password"
   description = "Root password for the rds container"
   recovery_window_in_days = 0 
-  tags = merge(local.common_tags, { Name = "${var.project_name}-mongo-password-secret" })
+  tags = merge(local.common_tags, { Name = "${var.project_name}-rdsdb-password-secret" })
 
 
 }
 # Store just the password in Secrets Manager for the MongoDB container to usehttp
 resource "aws_secretsmanager_secret_version" "rdsdb_root_password_val" {
   secret_id     = aws_secretsmanager_secret.rdsdb_root_password.id
-  secret_string = aws_db_instance.mysql_db.password
+  secret_string = random_password.db_password.result
   #   lifecycle {
   #   ignore_changes = [secret_string]
   # }
@@ -430,7 +376,7 @@ resource "aws_security_group" "internal_alb_sg" {
     from_port   = 4000
     to_port     = 4000
     protocol    = "tcp"
-    cidr_blocks = [aws_security_group.ecs_node_frontend_sg.id]
+    security_groups = [aws_security_group.ecs_node_frontend_sg.id]
   }
 
 
@@ -450,7 +396,7 @@ resource "aws_security_group" "internal_alb_sg" {
 
 # NEW: Node SG (For the underlying EC2 instances to talk to AWS endpoints)
 resource "aws_security_group" "ecs_node_frontend_sg" {
-  name        = "ecs-node-sg-${local.env_suffix}"
+  name        = "ecs-node-frontend-sg-${local.env_suffix}"
   description = "SG for ECS EC2 nodes frontend"
   vpc_id      = aws_vpc.vpc.id
   
@@ -459,7 +405,7 @@ resource "aws_security_group" "ecs_node_frontend_sg" {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = [aws_security_group.alb_sg.id]
+    security_groups = [aws_security_group.alb_sg.id]
   }
 
 # 1. Existing Rule: Allow Public ALB to hit Ephemeral Ports
@@ -517,7 +463,7 @@ resource "aws_security_group" "ecs_node_frontend_sg" {
 }
 
 resource "aws_security_group" "ecs_node_backend_sg" {
-  name        = "ecs-node-sg-${local.env_suffix}"
+  name        = "ecs-node-backend-sg-${local.env_suffix}"
   description = "SG for ECS EC2 nodes backend"
   vpc_id      = aws_vpc.vpc.id
   
@@ -528,7 +474,7 @@ resource "aws_security_group" "ecs_node_backend_sg" {
     from_port   = 4000
     to_port     = 4000
     protocol    = "tcp"
-    cidr_blocks = [aws_security_group.internal_alb_sg.id]
+    security_groups = [aws_security_group.internal_alb_sg.id]
   }
 
 
@@ -571,7 +517,7 @@ resource "aws_security_group" "ecs_node_rds_sg" {
     from_port   = 3306
     to_port     = 3306
     protocol    = "tcp"
-    cidr_blocks = [aws_security_group.ecs_node_backend_sg.id]
+    security_groups = [aws_security_group.ecs_node_backend_sg.id]
   }
 
   egress {
@@ -644,12 +590,12 @@ resource "aws_db_instance" "mysql_db" {
   engine_version       = "8.0"
   instance_class       = "db.t3.micro" # Burstable instance for dev
   
-  db_name              = "myappdb"
-  username             = "admin"
-  password             = "YourSecurePassword123!" # Ideally use a Secret Manager here
+  db_name              = var.db_name
+  username             = var.db_username
+  password             = random_password.db_password.result
   
   db_subnet_group_name = aws_db_subnet_group.main.name
-  vpc_security_group_ids = [aws_security_group.rds_sg.id]
+  vpc_security_group_ids = [aws_security_group.ecs_node_rds_sg.id]
   
   parameter_group_name = "default.mysql8.0"
   publicly_accessible  = false
@@ -667,9 +613,12 @@ output "rds_endpoint" {
 resource "aws_ecs_task_definition" "db_seeder" {
   family                   = "db-seeder-${local.env_suffix}"
   requires_compatibilities = ["EC2"]
-  network_mode             = "awsvpc" # Required for security group assignment
-  cpu                      = "256"
-  memory                   = "512"
+  network_mode             = "host" # Required for security group assignment
+  cpu                      = var.db_cpu
+  memory                   = var.db_memory
+  execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
+  task_role_arn            = aws_iam_role.ecs_task_role.arn 
+
 
   container_definitions = jsonencode([
     {
@@ -678,16 +627,20 @@ resource "aws_ecs_task_definition" "db_seeder" {
       essential = true
       
       environment = [
-        { name = "DB_HOST", value = aws_db_instance.mysql_db.address },
-        { name = "DB_NAME", value = aws_db_instance.mysql_db.db_name },
-        { name = "DB_USER", value = aws_db_instance.mysql_db.username },
-        { name = "DB_PASSWORD", value = aws_secretsmanager_secret.password.secret } # In prod, use Secrets Manager
+        # { name = "DB_HOST", value = aws_db_instance.mysql_db.address },
+        { name = "DB_DATABASE", value = aws_db_instance.mysql_db.db_name },
+        { name = "DB_USER", value = aws_db_instance.mysql_db.username }
+      ]
+
+      secrets = [
+        { name = "DB_PASSWORD", valueFrom = aws_secretsmanager_secret.rdsdb_root_password.arn },
+        { name = "DB_HOST", valueFrom = aws_ssm_parameter.rds_db_address.arn }
       ]
 
       log_configuration = {
         log_driver = "awslogs"
         options = {
-          "awslogs-group"         = "/ecs/db-seeder-${local.env_suffix}"
+          "awslogs-group"         = "/ecs/lirwEcr-database-seeder-${local.env_suffix}"
           "awslogs-region"        = "us-east-1"
           "awslogs-stream-prefix" = "seeder"
         }
@@ -697,26 +650,26 @@ resource "aws_ecs_task_definition" "db_seeder" {
 }
 
 # Create the log group so you can see the seeding output
-resource "aws_cloudwatch_log_group" "seeder_logs" {
-  name              = "/ecs/db-seeder-${local.env_suffix}"
-  retention_in_days = 7
-}
+# resource "aws_cloudwatch_log_group" "seeder_logs" {
+#   name              = "/ecs/db-seeder-${local.env_suffix}"
+#   retention_in_days = 7
+# }
 
-resource "terraform_data" "db_migration" {
-  # This triggers only when the task definition ARN changes
-  triggers_replace = [aws_ecs_task_definition.db_seeder.arn]
-# This ensures the seeder runs AFTER the DB and Task Definition are ready
-  depends_on = [aws_db_instance.mysql_db, aws_ecs_task_definition.db_seeder]
-  provisioner "local-exec" {
-    command = <<EOT
-      aws ecs run-task \
-        --cluster ${aws_ecs_cluster.app_cluster.name} \
-        --task-definition ${aws_ecs_task_definition.db_seeder.arn} \
-        --launch-type EC2 \
-        --network-configuration 'awsvpcConfiguration={subnets=["${aws_subnet.pri_sub_3a.id}"],securityGroups=["${aws_security_group.ecs_node_backend_sg.id}"]}'
-    EOT
-  }
-}
+# resource "terraform_data" "db_migration" {
+#   # This triggers only when the task definition ARN changes
+#   triggers_replace = [aws_ecs_task_definition.db_seeder.arn]
+# # This ensures the seeder runs AFTER the DB and Task Definition are ready
+#   depends_on = [aws_db_instance.mysql_db, aws_ecs_task_definition.db_seeder]
+#   provisioner "local-exec" {
+#     command = <<EOT
+#       aws ecs run-task \
+#         --cluster ${aws_ecs_cluster.app_cluster.name} \
+#         --task-definition ${aws_ecs_task_definition.db_seeder.name} \
+#         --launch-type EC2 \
+#         --network-configuration 'awsvpcConfiguration={subnets=["${aws_subnet.pri_sub_3a.id}"],securityGroups=["${aws_security_group.ecs_node_backend_sg.id}"]}'
+#     EOT
+#   }
+# }
 #---------------------------------------------
 # 6. EC2 Auto Scaling Group & Launch Template
 #---------------------------------------------
@@ -811,10 +764,11 @@ resource "aws_ecs_cluster" "app_cluster" {
 }
 
 resource "aws_ecs_capacity_provider" "ec2_provider" {
-  name = "ec2-capacity-provider-${local.env_suffix}"
+  for_each = local.ecs_apps
+  name = "ec2-capacity-provider-${each.key}-${local.env_suffix}"
 
   auto_scaling_group_provider {
-    auto_scaling_group_arn         = aws_autoscaling_group.ecs_asg.arn
+    auto_scaling_group_arn         = aws_autoscaling_group.ecs_asg[each.key].arn
     managed_termination_protection = "DISABLED"
 
     managed_scaling {
@@ -824,16 +778,19 @@ resource "aws_ecs_capacity_provider" "ec2_provider" {
   }
 }
 
-resource "aws_ecs_cluster_capacity_providers" "cluster_attach" {
-  cluster_name = aws_ecs_cluster.app_cluster.name
-  capacity_providers = [aws_ecs_capacity_provider.ec2_provider.name]
+# i have already defined separately inside ecs service capacity provider strategy so not needed here
+# resource "aws_ecs_cluster_capacity_providers" "cluster_attach" {
+#   for_each = local.ecs_apps
 
-  default_capacity_provider_strategy {
-    base              = 1
-    weight            = 100
-    capacity_provider = aws_ecs_capacity_provider.ec2_provider.name
-  }
-}
+#   cluster_name = aws_ecs_cluster.app_cluster.name
+#   capacity_providers = [aws_ecs_capacity_provider.ec2_provider[each.key].name]
+
+#   default_capacity_provider_strategy {
+#     base              = 1
+#     weight            = 100
+#     capacity_provider = aws_ecs_capacity_provider.ec2_provider[each.key].name
+#   }
+# }
 
 
 #---------------------------------------------
@@ -1148,8 +1105,8 @@ resource "aws_ecs_task_definition" "backend" {
       essential = true
       
       # Resource limits moved to the container level to prevent host OOM issues
-      memory    = var.mongo_memory 
-      cpu       = var.mongo_cpu
+      memory    = var.app_cpu 
+      cpu       = var.app_memory
       
       portMappings = [
         {
@@ -1160,14 +1117,15 @@ resource "aws_ecs_task_definition" "backend" {
       ]
       
       environment = [
-        { name = "DB_HOST", value = rds.link },
-        { name = "DB_USER", value = "admin-123" }
-        { name = "DB_DATABASE", value = <react_node_app> }
-        { name = "DB_PORT", value = "3306" }
+        # { name = "DB_HOST", value = aws_db_instance.mysql_db.address },
+        { name = "DB_DATABASE", value = aws_db_instance.mysql_db.db_name },
+        { name = "DB_USER", value = aws_db_instance.mysql_db.username },
+        { name = "DB_PORT", value = tostring(aws_db_instance.mysql_db.port) }
       ]
-      
+
       secrets = [
-        { name = "DB_PASSWORD", valueFrom = aws_secretsmanager_secret.rdsdb_root_password.arn }
+        { name = "DB_PASSWORD", valueFrom = aws_secretsmanager_secret.rdsdb_root_password.arn },
+        { name = "DB_HOST", valueFrom = aws_ssm_parameter.rds_db_address.arn }
       ]
 
       mountPoints = [
@@ -1356,7 +1314,7 @@ resource "aws_ecs_task_definition" "app" {
 resource "aws_lb" "backend_internal" {
   name               = "backend-internal-nlb-${local.env_suffix}"
   internal           = true
-  load_balancer_type = "network"
+  load_balancer_type = "application"
   enable_cross_zone_load_balancing = true
   
   # Deploy this in your private subnets
@@ -1372,7 +1330,7 @@ resource "aws_lb" "backend_internal" {
 resource "aws_lb_listener" "backend_listener" {
   load_balancer_arn = aws_lb.backend_internal.arn
   port              = "4000"
-  protocol          = "TCP"
+  protocol          = "HTTP"
 
   default_action {
     type             = "forward"
@@ -1386,7 +1344,7 @@ resource "aws_lb_listener" "backend_listener" {
 resource "aws_lb_target_group" "backend_internal" {
   name     = "backend-internal-tg"
   port     = 4000
-  protocol = "TCP" # Crucial for MongoDB
+  protocol = "HTTP" # Crucial for MongoDB
   vpc_id   = aws_vpc.vpc.id
   # target_type = "ip" # Must be 'ip' when using awsvpc network mode
   target_type = "instance" # Must be 'instance' when using host/bridge network mode
@@ -1396,7 +1354,7 @@ resource "aws_lb_target_group" "backend_internal" {
 
   # Health check using TCP to ensure the port is open
   health_check {
-    protocol            = "TCP"
+    protocol            = "HTTP"
     path = "/health"
     port                = "traffic-port"
     healthy_threshold   = 3
@@ -1426,8 +1384,10 @@ resource "aws_ecs_service" "backend" {
   }
 
   capacity_provider_strategy {
-    capacity_provider = aws_ecs_capacity_provider.ec2_provider.name
+    capacity_provider = aws_ecs_capacity_provider.ec2_provider["backend"].name
     weight            = 100
+    base              = 1
+
   }
 
   health_check_grace_period_seconds = 60
@@ -1445,7 +1405,7 @@ resource "aws_ecs_service" "backend" {
 
   depends_on = [
     aws_lb_listener.backend_listener,
-    aws_ecs_cluster_capacity_providers.cluster_attach
+    # aws_ecs_cluster_capacity_providers.cluster_attach
   ]
 
   # Ensure the tasks are distributed across your EC2 instances (if running multiple)
@@ -1545,8 +1505,10 @@ resource "aws_ecs_service" "app" {
   }
 
   capacity_provider_strategy {
-    capacity_provider = aws_ecs_capacity_provider.ec2_provider.name
+    capacity_provider = aws_ecs_capacity_provider.ec2_provider["frontend"].name
     weight            = 100
+    base              = 1
+
   }
 
 
@@ -1565,7 +1527,7 @@ resource "aws_ecs_service" "app" {
 
   depends_on = [
     aws_lb_listener.app_listener_https_secure,
-    aws_ecs_cluster_capacity_providers.cluster_attach
+    # aws_ecs_cluster_capacity_providers.cluster_attach
   ]
 
   # Optional: Spread tasks evenly across Availability Zones

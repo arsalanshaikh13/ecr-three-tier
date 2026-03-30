@@ -1,3 +1,5 @@
+# gh auth login
+
 # # Set the AWS Account ID
 # gh variable set ACCOUNT_ID --body "750702272407" --repo arsalanshaikh13/ecr-three-tier
 
@@ -77,3 +79,36 @@
 # gh api --method DELETE repos/arsalanshaikh13/ecr-three-tier/environments/test
 # gh api --method DELETE repos/arsalanshaikh13/ecr-three-tier/environments/production
 # gh api --method DELETE repos/arsalanshaikh13/ecr-three-tier/environments/dev
+
+
+
+
+# setup the ssh login for gh
+# Generate a new Ed25519 SSH key (recommended)
+ssh-keygen -t ed25519 -C "m.arsalanshaikh13@gmail.com"
+
+# Start the ssh-agent in the background
+eval "$(ssh-agent -s)"
+
+# Add your private key to the agent
+ssh-add ~/.ssh/id_ed25519
+
+# Verify the Connection
+ssh -T git@github.com
+
+# Starts the interactive login. Choose SSH as the preferred protocol.
+gh auth login
+# Or
+# non interactive login
+echo "<your_gh_token>" | gh auth login --with-token --hostname github.com
+# read token from file to avoid putting the token in your process tree:
+gh auth login --with-token < mytoken.txt
+
+
+# Re-authenticates with specific "scopes" (permissions) to manage keys.
+gh auth refresh -h github.com -s admin:public_key 
+# Uploads your local public key to your GitHub account.
+gh ssh-key add ~/.ssh/id_ed25519.pub --title "Laptop"
+
+# Verify the Connection
+ssh -T git@github.com

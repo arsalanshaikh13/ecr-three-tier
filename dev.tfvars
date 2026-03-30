@@ -30,6 +30,12 @@ app_memory    = 1024 # 1 GB
 image_tag     = "latest"
 desired_count = 1
 
+db_cpu = 1024
+db_memory = 2048
+db_name = "lirwEcrDB"
+# db_password = "secret_password"
+db_username = "admin123"
+
 # Secret (use ARN of secret in AWS Secrets Manager)
 secret_key     = "Secret Key"
 better_auth_secret = "eE0n2KuKkUnDkOWAandcOV8unOrISebs"

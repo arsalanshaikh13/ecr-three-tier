@@ -1,11 +1,11 @@
 -- Create Database and User
-CREATE DATABASE IF NOT EXISTS <react_node_app>;
+CREATE DATABASE IF NOT EXISTS `<react_node_app>`;
 SHOW DATABASES;
-USE <react_node_app>;
+USE `<react_node_app>`;
 
 -- Drop user if exists, then create
 CREATE USER  IF NOT EXISTS 'appuser'@'%' IDENTIFIED BY 'learnIT02#'; 
-GRANT ALL PRIVILEGES ON <react_node_app>.* TO ' appuser'@'%'; 
+GRANT ALL PRIVILEGES ON `<react_node_app>`.* TO ' appuser'@'%'; 
 FLUSH PRIVILEGES; 
 
 
@@ -45,12 +45,12 @@ SELECT
   title AS "Book Title",
   DATE_FORMAT(releaseDate, '%Y-%m-%d') AS "Release Date",
   LEFT(description, 80) AS "Short Description"
-FROM <react_node_app>.book
+FROM `<react_node_app>`.book
 LIMIT 5;
 SELECT 
   id,
   name AS "author name",
   DATE_FORMAT(birthday, '%Y-%m-%d') AS "BirthDay ",
   LEFT(bio, 80) AS "Short bio"
-FROM <react_node_app>.author
+FROM `<react_node_app>`.author
 LIMIT 5;

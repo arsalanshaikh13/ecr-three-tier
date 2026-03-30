@@ -29,8 +29,7 @@ on:
 env:
   AWS_REGION: us-east-1
   # These are prefixes. The matrix will append '-frontend' or '-backend' to them
-  ECS_CLUSTER: app_cluster
-  DOMAIN_NAME: devsandbox.space
+  ECS_CLUSTER: ecs-cluster-${{ vars.ENV_VAR }}
 
 permissions:
   id-token: write
@@ -118,7 +117,7 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           # Dynamically set repository based on matrix component
-          ECR_REPOSITORY: lirw-ecr-${{ matrix.component }}
+          ECR_REPOSITORY: lirwEcr-${{ matrix.component }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
           cd lirw-three-tier/${{ matrix.component }}
@@ -181,23 +180,80 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and Push Seeder Image
+        id: build-seeder
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: lirw-ecr-backend # Reusing backend repo for seeder tag
+          ECR_REPOSITORY: lirwEcr-database-seed-repo-${{ vars.ENV_VAR }}
+          IMAGE_TAG: ${{ github.sha }} # Use SHA for a unique tag
         run: |
-          cd lirw-three-tier/database-seeder # Adjust path to your seeder Dockerfile
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:seeder-latest .
+          cd lirw-three-tier/database-seeder
+
+          # Build and push with a unique tag AND the latest tag
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:seeder-latest .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:seeder-latest
+
+          # Output the unique image URI so the next step can use it
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Download current Seeder task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition db-seeder \
+            --query taskDefinition > task-definition-seeder.json
+
+      - name: Render new task definition with new image
+        id: render-seeder-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition-seeder.json
+          # CRITICAL: Change this to match the container name in your Terraform db-seeder task definition!
+          container-name: mysql-seeder
+          image: ${{ steps.build-seeder.outputs.image }}
+
+      - name: Register new Task Definition
+        id: register-task-def
+        run: |
+          # Register the updated JSON with AWS and capture the new Revision ARN
+          NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://${{ steps.render-seeder-task-def.outputs.task-definition }} \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+            
+          echo "task_def_arn=$NEW_TASK_DEF_ARN" >> $GITHUB_OUTPUT
+
+      - name: Fetch Network IDs via AWS CLI
+        id: lookup
+        run: |
+          # 1. Look up the Backend Security Group by its Name tag
+          SG_ID=$(aws ec2 describe-security-groups \
+            --filters "Name=tag:Name,Values=ecs-node-backend-sg-${{ vars.ENV_VAR }}" \
+            --query "SecurityGroups[0].GroupId" \
+            --output text)
+
+          # 2. Look up the Private Subnets by their Name tags
+          SUBNETS=$(aws ec2 describe-subnets \
+            --filters "Name=tag:Name,Values=*pri_sub_*" \
+            --query 'Subnets[*].SubnetId' \
+            --output json | tr -d '\n' | tr -d ' ')
+            
+          if [ "$SG_ID" == "None" ] || [ -z "$SUBNETS" ]; then
+            echo "Error: Could not find Security Group or Subnets"
+            exit 1
+          fi
+
+          echo "sg_id=$SG_ID" >> $GITHUB_OUTPUT
+          echo "subnets=$SUBNETS" >> $GITHUB_OUTPUT
 
       - name: Trigger ECS Run-Task for Seeding
         run: |
           aws ecs run-task \
             --cluster ${{ env.ECS_CLUSTER }} \
-            --task-definition db-seeder \
+            --task-definition ${{ steps.register-task-def.outputs.task_def_arn }} \
             --launch-type EC2 \
             --network-configuration '{
               "awsvpcConfiguration": {
-                "subnets": ["${{ secrets.PRIVATE_SUBNET_3A }}", "${{ secrets.PRIVATE_SUBNET_4B }}"],
-                "securityGroups": ["${{ secrets.BACKEND_SG_ID }}"]
+                "subnets": ${{ steps.lookup.outputs.subnets }},
+                "securityGroups": ["${{ steps.lookup.outputs.sg_id }}"]
               }
             }'
