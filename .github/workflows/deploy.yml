@@ -264,33 +264,32 @@ jobs:
             
           echo "task_def_arn=$NEW_TASK_DEF_ARN" >> $GITHUB_OUTPUT
 
-      - name: Fetch Network IDs via AWS CLI
-        id: lookup
-        run: |
-          # 1. Look up the Backend Security Group by its Name tag
-          SG_ID=$(aws ec2 describe-security-groups \
-            --filters "Name=group-name,Values=ecs-node-backend-sg-${{ vars.ENV_VAR }}" \
-            --query "SecurityGroups[0].GroupId" \
-            --output text)
+      # - name: Fetch Network IDs via AWS CLI
+      #   id: lookup
+      #   run: |
+      #     # 1. Look up the Backend Security Group by its Name tag
+      #     SG_ID=$(aws ec2 describe-security-groups \
+      #       --filters "Name=group-name,Values=ecs-node-backend-sg-${{ vars.ENV_VAR }}" \
+      #       --query "SecurityGroups[0].GroupId" \
+      #       --output text)
 
-          # 2. Look up the Private Subnets by their Name tags
-          SUBNETS=$(aws ec2 describe-subnets \
-            --filters "Name=tag:Name,Values=pri-sub-*" \
-            --query 'Subnets[*].SubnetId' \
-            --output json | tr -d '\n' | tr -d ' ')
-            
-          if [ "$SG_ID" == "None" ] || [ -z "$SUBNETS" ]; then
-            echo "Error: Could not find Security Group or Subnets"
-            exit 1
-          fi
+      #     # 2. Look up the Private Subnets by their Name tags
+      #     SUBNETS=$(aws ec2 describe-subnets \
+      #       --filters "Name=tag:Name,Values=pri-sub-*" \
+      #       --query 'Subnets[*].SubnetId' \
+      #       --output json | tr -d '\n' | tr -d ' ')
 
-          echo "sg_id=$SG_ID" >> $GITHUB_OUTPUT
-          echo "subnets=$SUBNETS" >> $GITHUB_OUTPUT
+      #     if [ "$SG_ID" == "None" ] || [ -z "$SUBNETS" ]; then
+      #       echo "Error: Could not find Security Group or Subnets"
+      #       exit 1
+      #     fi
+
+      #     echo "sg_id=$SG_ID" >> $GITHUB_OUTPUT
+      #     echo "subnets=$SUBNETS" >> $GITHUB_OUTPUT
 
       - name: Trigger ECS Run-Task for Seeding
         run: |
           aws ecs run-task \
             --cluster ${{ env.ECS_CLUSTER }} \
             --task-definition ${{ steps.register-task-def.outputs.task_def_arn }} \
-            --launch-type EC2 
-
+            --launch-type EC2
