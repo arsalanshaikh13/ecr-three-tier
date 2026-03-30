@@ -189,7 +189,7 @@ jobs:
         with:
           task-definition: task-definition-${{ matrix.component }}.json
           container-name: lirw_ecr_${{ matrix.component }}
-          image: ${{ steps.build-image.outputs.image }}
+          image: ${{ steps.build-image.outputs.image || steps.determine-image.outputs.final_image  }}
 
       - name: Deploy Amazon ECS task definition
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
