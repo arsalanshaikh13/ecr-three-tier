@@ -129,36 +129,38 @@ detect-changes:
     - aws ecs update-service --cluster $ECS_CLUSTER --service $SERVICE_NAME --task-definition $NEW_TASK_ARN --force-new-deployment
     - aws ecs wait services-stable --cluster $ECS_CLUSTER --services $SERVICE_NAME
 
-deploy-frontend:
+deploy-services:
   extends: .deploy_template
   needs:
     - job: detect-changes
       artifacts: true
   variables:
-    SHOULD_BUILD: $BUILD_FRONTEND
-    BUILD_DIR: "lirw-three-tier/frontend"
     DOCKERFILE_NAME: "Dockerfile"
-    ECR_REPOSITORY: "lirw-ecr-frontend-repo-$ENV_VAR"
-    TASK_FAMILY: "lirw-ecr-frontend"
-    SERVICE_NAME: "frontend-service"
+  parallel:
+    matrix:
+      - APP_NAME: "frontend"
+        BUILD_DIR: "lirw-three-tier/frontend"
+        ECR_REPOSITORY: "lirw-ecr-frontend-repo-$ENV_VAR"
+        TASK_FAMILY: "lirw-ecr-frontend"
+        SERVICE_NAME: "frontend-service"
+      - APP_NAME: "backend"
+        BUILD_DIR: "lirw-three-tier/backend"
+        ECR_REPOSITORY: "lirw-ecr-backend-repo-$ENV_VAR"
+        TASK_FAMILY: "lirw-ecr-backend"
+        SERVICE_NAME: "backend-service"
   rules:
-    - if: '$BUILD_FRONTEND == "true" || $GET_FRONTEND == "true"'
-
-deploy-backend:
-  extends: .deploy_template
-  needs:
-    - job: detect-changes
-      artifacts: true
-  variables:
-    SHOULD_BUILD: $BUILD_BACKEND
-    BUILD_DIR: "lirw-three-tier/backend"
-    DOCKERFILE_NAME: "Dockerfile"
-    ECR_REPOSITORY: "lirw-ecr-backend-repo-$ENV_VAR"
-    TASK_FAMILY: "lirw-ecr-backend"
-    SERVICE_NAME: "backend-service"
-  rules:
-    - if: '$BUILD_BACKEND == "true" || $GET_BACKEND == "true"'
-
+    # Spawn the frontend matrix job if frontend variables are triggered
+    - if: '$APP_NAME == "frontend" && ($BUILD_FRONTEND == "true" || $GET_FRONTEND == "true")'
+    # Spawn the backend matrix job if backend variables are triggered
+    - if: '$APP_NAME == "backend" && ($BUILD_BACKEND == "true" || $GET_BACKEND == "true")'
+  before_script:
+    # Dynamically assign SHOULD_BUILD based on which matrix instance is running
+    - if [ "$APP_NAME" == "frontend" ]; then export SHOULD_BUILD="$BUILD_FRONTEND"; fi
+    - if [ "$APP_NAME" == "backend" ]; then export SHOULD_BUILD="$BUILD_BACKEND"; fi
+    # Proceed with the standard deployment scripts
+    - !reference [.deploy_template, before_script]
+  script:
+    - !reference [.deploy_template, script]
 # ---------------------------------------------------------
 # 3. DB SEEDING
 # ---------------------------------------------------------
