@@ -308,7 +308,7 @@ jobs:
                 "subnets": ${{ steps.lookup.outputs.subnets }},
                 "securityGroups": ["${{ steps.lookup.outputs.sg_id }}"]
                 }
-              }' \ 
+              }' \
             --query "tasks[0].taskArn" \
             --output text)
             
