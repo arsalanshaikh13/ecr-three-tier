@@ -1,5 +1,11 @@
 #!/bin/bash
-source .env_gitlab
+source ./gh_glab_scripts/.env_gitlab
+echo "gitlab token : $GITLAB_TOKEN "
+glab config set check_update false
+glab config set display_status false
+# To explicitly disable the usage tracking causing the error:
+export GLAB_REPORT_USAGE=false
+
 # 1. Authenticate using the PAT (uses 'api' and 'read_user' scopes)
 glab auth login --token "$GITLAB_TOKEN" --hostname gitlab.com
 # Set SSH as the default protocol
