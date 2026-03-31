@@ -25,6 +25,9 @@ variables:
   BUILD_BACKEND:
     value: "false"
     description: "Set to 'true' to build backend image, otherwise fetches latest"
+  SEED_DATABASE:
+    value: "false"
+    description: "Set to 'true' to seed Database from ci cd pipeline"
 
 # ---------------------------------------------------------
 # GLOBAL CONFIGURATION
@@ -57,12 +60,50 @@ default:
         ECR_REPOSITORY: "lirw-ecr-frontend-repo-$ENV_VAR"
         TASK_FAMILY: "lirw-ecr-frontend"
         ECS_SERVICE_NAME: "frontend-service"
+        VAR_NAME: "$BUILD_FRONTEND"
       - SERVICE: "backend"
         BUILD_DIR: "lirw-three-tier/backend"
         ECR_REPOSITORY: "lirw-ecr-backend-repo-$ENV_VAR"
         TASK_FAMILY: "lirw-ecr-backend"
         ECS_SERVICE_NAME: "backend-service"
+        VAR_NAME: "$BUILD_BACKEND"
+      - SERVICE: "seed-database"
+        BUILD_DIR: "lirw-three-tier/database-seeder"
+        ECR_REPOSITORY: "lirw-ecr-database-seed-repo-$ENV_VAR"
+        TASK_FAMILY: "db-seeder-$ENV_VAR"
+        VAR_NAME: "$SEED_DATABASE"
 
+# ---------------------------------------------------------
+# STAGE DETECT CHANGES
+# ---------------------------------------------------------
+
+detect-changes:
+  stage: detect
+  image: alpine:latest
+  rules:
+    # 1. If it's a manual UI trigger, DO NOT run this job at all.
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      when: never
+    # Run for all other cases (like pushes)
+    - when: always
+  extends: .service_matrix
+  script:
+    - apk add --no-cache git
+    # Create a unique env file for this specific matrix job
+    - touch build-${SERVICE}.env
+    - git diff --name-only $CI_COMMIT_BEFORE_SHA $CI_COMMIT_SHA > changed_files.txt
+    - |
+      # Check if this specific service's directory has changes
+      if grep -q "$DIR_PATH" changed_files.txt; then 
+        echo "${VAR_NAME}=true" >> build-${SERVICE}.env
+        echo "✅ Changes detected in $SERVICE. Setting $VAR_NAME=true"
+      else
+        echo "No changes in $SERVICE."
+      fi
+  artifacts:
+    reports:
+      # GitLab will automatically merge the dotenv files from all 3 matrix jobs
+      dotenv: build-${SERVICE}.env
 # ---------------------------------------------------------
 # STAGE 1: BUILD & PUSH
 # ---------------------------------------------------------
@@ -70,14 +111,22 @@ build_image:
   stage: build
   extends: .service_matrix
   image: docker:24.0.5
+  needs:
+    - job: detect-changes
+      artifacts: true
+      optional: true # CRITICAL: Prevents pipeline crash if detect-changes is skipped (e.g., manual UI triggers)
   services:
     - docker:24.0.5-dind
   before_script:
     - apk add --no-cache aws-cli
     - !reference [.aws_oidc_login, script]
-    # Dynamically assign the build flag based on the current matrix service
-    - if [ "$SERVICE" == "frontend" ]; then export SHOULD_BUILD="$BUILD_FRONTEND"; fi
-    - if [ "$SERVICE" == "backend" ]; then export SHOULD_BUILD="$BUILD_BACKEND"; fi
+
+    # 1. Dynamically evaluate the variable name stored in $VAR_NAME (e.g., $BUILD_FRONTEND)
+    - eval export SHOULD_BUILD=\$${VAR_NAME}
+
+    # 2. If the variable is empty (meaning no changes were detected), default it to "false"
+    - export SHOULD_BUILD=${SHOULD_BUILD:-false}
+
   script:
     - ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
@@ -93,20 +142,21 @@ build_image:
         
         FINAL_IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
       else
-        echo "🔍 Fetching latest tag from ECR for $SERVICE..."
+        echo "🔍 No changes detected. Fetching latest tag from ECR for $SERVICE..."
         FETCHED_TAG=$(aws ecr describe-images --repository-name $ECR_REPOSITORY --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags[0]' --output text)
         
-        if [ "$FETCHED_TAG" == "None" ] || [ -z "$FETCHED_TAG" ]; then exit 1; fi
+        if [ "$FETCHED_TAG" == "None" ] || [ -z "$FETCHED_TAG" ]; then 
+          echo "❌ No previous image found in ECR to fallback on." && exit 1
+        fi
         
         FINAL_IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$FETCHED_TAG"
       fi
 
-    # Force the file to be created in the absolute root of the project
+    - echo "✅ Resolved Image: $FINAL_IMAGE"
     - echo "$FINAL_IMAGE" > $CI_PROJECT_DIR/${SERVICE}-image.txt
   artifacts:
     paths:
       - ${SERVICE}-image.txt
-
 # ---------------------------------------------------------
 # STAGE 2: PREPARE MANIFESTS
 # ---------------------------------------------------------
@@ -146,6 +196,9 @@ deploy_ecs:
   stage: deploy
   extends: .service_matrix
   image: alpine:latest
+  rules:
+    # 1. Target ONLY the frontend and backend matrix instances (Ignore the seeder)
+    - if: '$SERVICE == "frontend" || $SERVICE == "backend"'
   needs:
     - job: prepare_manifest
       artifacts: true
@@ -167,3 +220,38 @@ deploy_ecs:
     - echo "Waiting for service to stabilize..."
     - aws ecs wait services-stable --cluster $ECS_CLUSTER --services $ECS_SERVICE_NAME
     - echo "✅ Deployment Successful!"
+
+seed-database:
+  stage: seed
+  image: alpine:latest
+  extends: .service_matrix
+  needs:
+    - job: prepare_manifest
+      artifacts: true
+  rules:
+    # 1. Target ONLY the database-seeder matrix instance
+    # 2. ONLY run if the $SEED_DATABASE variable evaluated to "true"
+    - if: '$SERVICE == "database-seeder" && $SEED_DATABASE == "true"'
+  before_script:
+    - apk add --no-cache aws-cli
+    - !reference [.aws_oidc_login, script]
+  script:
+    - echo "Registering new ECS task definition for $SERVICE..."
+    - >
+      NEW_TASK_ARN=$(aws ecs register-task-definition 
+      --cli-input-json file://${SERVICE}-ready-task-def.json 
+      --query 'taskDefinition.taskDefinitionArn' --output text)
+
+    - echo "Starting DB Seeding Task with ARN: $NEW_TASK_ARN..."
+    - TASK_ARN=$(aws ecs run-task --cluster $ECS_CLUSTER --task-definition $NEW_TASK_ARN --launch-type EC2 --query "tasks[0].taskArn" --output text)
+
+    - echo "Waiting for task to stop..."
+    - aws ecs wait tasks-stopped --cluster $ECS_CLUSTER --tasks $TASK_ARN
+
+    - EXIT_CODE=$(aws ecs describe-tasks --cluster $ECS_CLUSTER --tasks $TASK_ARN --query "tasks[0].containers[0].exitCode" --output text)
+    - |
+      if [ "$EXIT_CODE" -eq "0" ]; then 
+        echo "✅ Seeding Success"
+      else 
+        echo "❌ Seeding Failed" && exit 1
+      fi
