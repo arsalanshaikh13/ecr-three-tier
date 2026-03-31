@@ -131,12 +131,14 @@ build_image:
     - apk add --no-cache aws-cli
     - !reference [.aws_oidc_login, script]
 
-    # 1. Dynamically evaluate the variable name stored in $VAR_NAME (e.g., $BUILD_FRONTEND)
-    - eval export SHOULD_BUILD=\$${VAR_NAME}
+    - |
+      # Dynamically evaluate variable name stored in VAR_NAME
+      eval "SHOULD_BUILD=\${$VAR_NAME}"
 
-    # 2. If the variable is empty (meaning no changes were detected), default it to "false"
-    - export SHOULD_BUILD=${SHOULD_BUILD:-false}
+      # Default fallback
+      SHOULD_BUILD=${SHOULD_BUILD:-false}
 
+      export SHOULD_BUILD
   script:
     - ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
