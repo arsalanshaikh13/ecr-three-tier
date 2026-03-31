@@ -4,13 +4,13 @@ set -e # Exit immediately if a command exits with a non-zero status
 # echo "Starting seeder script..."
 
 # # 1. Replace the placeholder with the actual DB Name from Environment Variables
-# if [ -z "$DB_NAME" ]; then
-#   echo "Error: DB_NAME environment variable is not set."
+# if [ -z "$DB_DATABASE" ]; then
+#   echo "Error: DB_DATABASE environment variable is not set."
 #   exit 1
 # fi
 
-# # sed -i "s/<react_node_app>/$DB_NAME/g" /scripts/db.sql
-# sed -i "s/<react_node_app>/$DB_NAME/g" db.sql
+# # sed -i "s/<react_node_app>/$DB_DATABASE/g" /scripts/db.sql
+# sed -i "s/<react_node_app>/$DB_DATABASE/g" db.sql
 
 # # 2. Wait for MySQL to be ready (RDS might be up, but network routing can take a second)
 # echo "Waiting for host $DB_HOST to be reachable..."
@@ -20,7 +20,7 @@ set -e # Exit immediately if a command exits with a non-zero status
 # done
 
 # # 3. Run the SQL script
-# echo "Seeding database $DB_NAME..."
+# echo "Seeding database $DB_DATABASE..."
 # # mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASSWORD" < /scripts/db.sql
 # mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASSWORD" < db.sql
 
@@ -30,14 +30,14 @@ set -e # Exit immediately if a command exits with a non-zero status
 
 echo "Starting seeder script..."
 
-# 1. Check for DB_NAME
-if [ -z "$DB_NAME" ]; then
-  echo "[ERROR] DB_NAME environment variable is not set."
+# 1. Check for DB_DATABASE
+if [ -z "$DB_DATABASE" ]; then
+  echo "[ERROR] DB_DATABASE environment variable is not set."
   exit 1
 fi
 
-echo "Replacing placeholder with $DB_NAME in SQL file..."
-sed -i "s/<react_node_app>/$DB_NAME/g" db.sql
+echo "Replacing placeholder with $DB_DATABASE in SQL file..."
+sed -i "s/<react_node_app>/$DB_DATABASE/g" db.sql
 
 # 2. Wait for MySQL to be ready
 echo "Waiting for host $DB_HOST to be reachable..."
@@ -49,7 +49,7 @@ done
 echo "Database connection established!"
 
 # 3. Run the SQL script and capture the error code
-echo "Seeding database $DB_NAME..."
+echo "Seeding database $DB_DATABASE..."
 
 # Run mysql and capture its exit code
 if mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASSWORD" < db.sql; then
