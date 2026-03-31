@@ -6,6 +6,7 @@ function AuthorsController() {}
 
 const getQuery = "SELECT * FROM author";
 let db;
+
 (async () => {
   try {
     db = await dbPromise;
@@ -14,6 +15,7 @@ let db;
     process.exit(1);
   }
 })();
+
 AuthorsController.prototype.get = async (req, res) => {
   try {
     logger.info("AuthorsController [GET]");
@@ -21,7 +23,11 @@ AuthorsController.prototype.get = async (req, res) => {
     db.query(getQuery, (err, authors) => {
       if (err) {
         logger.error(`Error executing query: ${err.message}`);
-        throw new Error("Error executing query.");
+        // FIXED: Return 500 instead of crashing
+        return res.status(500).json({
+          message: "Database query failed.",
+          details: err.message,
+        });
       }
 
       logger.info(`Authors count: ${authors.length}`);
@@ -43,7 +49,7 @@ AuthorsController.prototype.create = async (req, res) => {
     const { name, birthday, bio } = req.body;
 
     logger.info(
-      `AuthorsController [CREATE] - name: ${name}, birthday: ${birthday}, bio: ${bio}`
+      `AuthorsController [CREATE] - name: ${name}, birthday: ${birthday}, bio: ${bio}`,
     );
 
     db.query(
@@ -52,17 +58,25 @@ AuthorsController.prototype.create = async (req, res) => {
       (err) => {
         if (err) {
           logger.error(`Error executing query: ${err.message}`);
-          throw new Error("Error executing query.");
+          // FIXED
+          return res.status(500).json({
+            message: "Database query failed.",
+            details: err.message,
+          });
         }
 
         db.query(getQuery, (err, authors) => {
           if (err) {
             logger.error(`Error executing query: ${err.message}`);
-            throw new Error("Error executing query.");
+            // FIXED
+            return res.status(500).json({
+              message: "Database query failed.",
+              details: err.message,
+            });
           }
 
           logger.info(
-            `Author created successfully. authors count: ${authors.length}`
+            `Author created successfully. authors count: ${authors.length}`,
           );
 
           return res.status(200).json({
@@ -70,7 +84,7 @@ AuthorsController.prototype.create = async (req, res) => {
             authors: authors,
           });
         });
-      }
+      },
     );
   } catch (error) {
     logger.error(`Error: ${error.message}`);
@@ -86,7 +100,7 @@ AuthorsController.prototype.update = async (req, res) => {
     const { name, birthday, bio } = req.body;
 
     logger.info(
-      `AuthorsController [UPDATE] - authorId: ${authorId}, name: ${name}, birthday: ${birthday}, bio: ${bio}`
+      `AuthorsController [UPDATE] - authorId: ${authorId}, name: ${name}, birthday: ${birthday}, bio: ${bio}`,
     );
 
     db.query(
@@ -95,17 +109,25 @@ AuthorsController.prototype.update = async (req, res) => {
       (err) => {
         if (err) {
           logger.error(`Error executing query: ${err.message}`);
-          throw new Error("Error executing query.");
+          // FIXED
+          return res.status(500).json({
+            message: "Database query failed.",
+            details: err.message,
+          });
         }
 
         db.query(getQuery, (err, authors) => {
           if (err) {
             logger.error(`Error executing query: ${err.message}`);
-            throw new Error("Error executing query.");
+            // FIXED
+            return res.status(500).json({
+              message: "Database query failed.",
+              details: err.message,
+            });
           }
 
           logger.info(
-            `Author updated successfully. authors count: ${authors.length}`
+            `Author updated successfully. authors count: ${authors.length}`,
           );
 
           return res.status(200).json({
@@ -113,7 +135,7 @@ AuthorsController.prototype.update = async (req, res) => {
             authors: authors,
           });
         });
-      }
+      },
     );
   } catch (error) {
     logger.error(`Error: ${error.message}`);
@@ -132,17 +154,25 @@ AuthorsController.prototype.delete = async (req, res) => {
     db.query("DELETE FROM author WHERE id = ?", [authorId], (err, result) => {
       if (err) {
         logger.error(`Error executing query: ${err.message}`);
-        throw new Error("Error executing query.");
+        // FIXED
+        return res.status(500).json({
+          message: "Database query failed.",
+          details: err.message,
+        });
       }
 
       db.query(getQuery, (err, authors) => {
         if (err) {
           logger.error(`Error executing query: ${err.message}`);
-          throw new Error("Error executing query.");
+          // FIXED
+          return res.status(500).json({
+            message: "Database query failed.",
+            details: err.message,
+          });
         }
 
         logger.info(
-          `Author deleted successfully. authors count: ${authors.length}`
+          `Author deleted successfully. authors count: ${authors.length}`,
         );
 
         return res.status(200).json({

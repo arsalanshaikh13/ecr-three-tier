@@ -23,7 +23,10 @@ BooksController.prototype.get = async (req, res) => {
     db.query(getQuery, (err, books) => {
       if (err) {
         logger.error(`Error executing query: ${err.message}`);
-        throw new Error("Error executing query.");
+        return res.status(500).json({
+          message: "Database query failed.",
+          details: err.message,
+        });
       }
 
       logger.info(`Books count: ${books.length}`);
@@ -51,7 +54,7 @@ BooksController.prototype.create = async (req, res) => {
     } = req.body;
 
     logger.info(
-      `BooksController [CREATE] - title: ${title}, description: ${description}, releaseDate: ${releaseDate}, pages: ${pages}, authorId: ${authorId}`
+      `BooksController [CREATE] - title: ${title}, description: ${description}, releaseDate: ${releaseDate}, pages: ${pages}, authorId: ${authorId}`,
     );
 
     db.query(
@@ -74,11 +77,14 @@ BooksController.prototype.create = async (req, res) => {
         db.query(getQuery, (err, books) => {
           if (err) {
             logger.error(`Error executing query: ${err.message}`);
-            throw new Error("Error executing query.");
+            return res.status(500).json({
+              message: "Database query failed.",
+              details: err.message,
+            });
           }
 
           logger.info(
-            `Book created successfully. books count: ${books.length}`
+            `Book created successfully. books count: ${books.length}`,
           );
 
           return res.status(200).json({
@@ -86,7 +92,7 @@ BooksController.prototype.create = async (req, res) => {
             books: books,
           });
         });
-      }
+      },
     );
   } catch (error) {
     logger.error(`Error: ${error.message}`);
@@ -108,7 +114,7 @@ BooksController.prototype.update = async (req, res) => {
     } = req.body;
 
     logger.info(
-      `BooksController [UPDATE] - title: ${title}, description: ${description}, releaseDate: ${releaseDate}, pages: ${pages}, authorId: ${authorId}`
+      `BooksController [UPDATE] - title: ${title}, description: ${description}, releaseDate: ${releaseDate}, pages: ${pages}, authorId: ${authorId}`,
     );
 
     db.query(
@@ -117,17 +123,23 @@ BooksController.prototype.update = async (req, res) => {
       (err) => {
         if (err) {
           logger.error(`Error executing query: ${err.message}`);
-          throw new Error("Error executing query.");
+          return res.status(500).json({
+            message: "Database query failed.",
+            details: err.message,
+          });
         }
 
         db.query(getQuery, (err, books) => {
           if (err) {
             logger.error(`Error executing query: ${err.message}`);
-            throw new Error("Error executing query.");
+            return res.status(500).json({
+              message: "Database query failed.",
+              details: err.message,
+            });
           }
 
           logger.info(
-            `Book updated successfully. books count: ${books.length}`
+            `Book updated successfully. books count: ${books.length}`,
           );
 
           return res.status(200).json({
@@ -135,7 +147,7 @@ BooksController.prototype.update = async (req, res) => {
             books: books,
           });
         });
-      }
+      },
     );
   } catch (error) {
     logger.error(`Error: ${error.message}`);
@@ -154,13 +166,19 @@ BooksController.prototype.delete = async (req, res) => {
     db.query("DELETE FROM book WHERE id = ?", [bookId], (err) => {
       if (err) {
         logger.error(`Error executing query: ${err.message}`);
-        throw new Error("Error executing query.");
+        return res.status(500).json({
+          message: "Database query failed.",
+          details: err.message,
+        });
       }
 
       db.query(getQuery, (err, books) => {
         if (err) {
           logger.error(`Error executing query: ${err.message}`);
-          throw new Error("Error executing query.");
+          return res.status(500).json({
+            message: "Database query failed.",
+            details: err.message,
+          });
         }
 
         logger.info(`Book deleted successfully. books count: ${books.length}`);

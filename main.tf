@@ -93,7 +93,7 @@ resource "aws_cloudwatch_log_group" "ecs_log_group" {
 
 # 1. Create a dedicated Log Group for your terminal sessions
 resource "aws_cloudwatch_log_group" "ecs_exec_logs" {
-  name              = "/ecs/execute-command/nextjs-cluster"
+  name              = "/ecs/execute-command/lirw-cluster"
   retention_in_days = 7
 }
 #---------------------------------------------
@@ -244,7 +244,7 @@ resource "aws_iam_role_policy_attachment" "ecs_metadata_attach_exec" {
 
 # 2. Create the policy that allows the container to open a terminal
 resource "aws_iam_policy" "ecs_exec_policy" {
-  name = "nextjs-ecs-exec-policy"
+  name = "lirw-ecs-exec-policy"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -325,14 +325,14 @@ resource "aws_secretsmanager_secret_version" "rdsdb_root_password_val" {
 
 # Construct the full URI and store it in Secrets Manager for the App container to use
 # MongoDB Connection String (URI)
-resource "aws_secretsmanager_secret" "mongodb_uri" {
-  name        = "/nextjs-task-manager/prod/mongodb-uri"
-  description = "Full connection string for the App to connect to MongoDB"
-  recovery_window_in_days = 0 
-  tags = merge(local.common_tags, { Name = "${var.project_name}-mongo-uri" })
+# resource "aws_secretsmanager_secret" "mongodb_uri" {
+#   name        = "/nextjs-task-manager/prod/mongodb-uri"
+#   description = "Full connection string for the App to connect to MongoDB"
+#   recovery_window_in_days = 0 
+#   tags = merge(local.common_tags, { Name = "${var.project_name}-mongo-uri" })
 
 
-}
+# }
 # resource "aws_secretsmanager_secret_version" "mongodb_uri_val" {
 #   secret_id     = aws_secretsmanager_secret.mongodb_uri.id
   
@@ -394,11 +394,19 @@ resource "aws_security_group" "internal_alb_sg" {
 
   ingress {
     description = "http access"
-    from_port   = 3200
-    to_port     = 3200
+    from_port   = 80
+    to_port     = 80
     protocol    = "tcp"
     security_groups = [aws_security_group.ecs_node_frontend_sg.id]
   }
+
+  # ingress {
+  #   description = "http access"
+  #   from_port   = 3200
+  #   to_port     = 3200
+  #   protocol    = "tcp"
+  #   security_groups = [aws_security_group.ecs_node_frontend_sg.id]
+  # }
 
 
   egress {
@@ -437,13 +445,13 @@ resource "aws_security_group" "ecs_node_frontend_sg" {
   #   protocol        = "tcp"
   #   security_groups = [aws_security_group.alb_sg.id]
   # }
-  ingress {
-    description     = "node port access from ALB"
-    from_port       = 3000
-    to_port         = 3000
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb_sg.id]
-  }
+  # ingress {
+  #   description     = "node port access from ALB"
+  #   from_port       = 3000
+  #   to_port         = 3000
+  #   protocol        = "tcp"
+  #   security_groups = [aws_security_group.alb_sg.id]
+  # }
 
   # 2. NEW: Allow the Internal NLB to route traffic to the Mongo Container
   # ingress {
@@ -708,8 +716,8 @@ locals {
     }
     backend = {
       instance_type = "c7i-flex.large"
-      # subnets       = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id]
-      subnets       = [aws_subnet.pub_sub_1a.id, aws_subnet.pub_sub_2b.id]
+      subnets       = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id]
+      # subnets       = [aws_subnet.pub_sub_1a.id, aws_subnet.pub_sub_2b.id]
       sg_id         = aws_security_group.ecs_node_backend_sg.id
     }
   }
@@ -897,209 +905,11 @@ resource "aws_route53_record" "subdomain_alias" {
 #---------------------------------------------
 # 9. ALB + Target Group + Listener
 #---------------------------------------------
-# resource "aws_lb" "app_alb" {
-#   name               = "alb-${local.env_suffix}"
-#   internal           = false
-#   load_balancer_type = "application"
-#   security_groups    = [aws_security_group.alb_sg.id]
-#   subnets            = [aws_subnet.pub_sub_1a.id, aws_subnet.pub_sub_2b.id]
-#   # subnets            = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id]
-#   # enable_deletion_protection = true 
-# }
 
-
-# resource "aws_lb_target_group" "app_tg" {
-#   for_each    = toset(["books", "authors", "dashboard"])
-#   name        = "${each.key}-tg-${local.env_suffix}"
-#   # name_prefix        = "${each.key}-tg-${local.env_suffix}"
-#   # name        = "tg-${local.env_suffix}"
-
-#   # 2. ADD 'name_prefix' (Must be 6 characters or less)
-#   # alway use name_prefix when we have to create and destroy the same resource
-#   # name_prefix          = "tg-${local.env_suffix}"
-#   # port        = 3200
-#   port        = 222
-#   # port        = 80
-#   protocol    = "HTTP"
-#   vpc_id      = aws_vpc.vpc.id
-#   # target_type = "ip" # Must be 'ip' when using awsvpc network mode
-#   target_type = "instance" # Must be 'instance' when using host/bridge network mode
-
-#   # ADD THIS LINE: Lower the wait time from 5 minutes to 30 seconds
-#   deregistration_delay = 30
-
-#   health_check {
-#     path                = "/health"
-#     healthy_threshold   = 5
-#     unhealthy_threshold = 3
-#     timeout             = 15
-#     interval            = 30
-#     matcher             = "200-399"
-#   }
-#   # 3. ADD THIS LIFECYCLE BLOCK
-#   lifecycle {
-#     create_before_destroy = true
-#   }
-# }
-
-
-
-# # Redirect HTTP to HTTPS
-# resource "aws_lb_listener" "http_redirect" {
-#   load_balancer_arn = aws_lb.app_alb.arn
-#   port              = 80
-#   protocol          = "HTTP"
-
-#   default_action {
-#     type = "redirect"
-#     redirect {
-#       port        = "443"
-#       protocol    = "HTTPS"
-#       status_code = "HTTP_301"
-#     }
-#   }
-# }
-
-# # Secure HTTPS Listener
-# resource "aws_lb_listener" "app_listener_https_secure" {
-#   load_balancer_arn = aws_lb.app_alb.arn
-#   port              = 443
-#   protocol          = "HTTPS"
-#   certificate_arn   = aws_acm_certificate_validation.app_cert_wait.certificate_arn
-
-#   default_action {
-#     type             = "forward"
-#     target_group_arn = aws_lb_target_group.app_tg["dashboard"].arn
-#   }
-# }
-# resource "aws_lb_listener_rule" "api_routing" {
-#   # Loop only through authors and books
-#   for_each     = setsubtract(toset(["books", "authors", "dashboard"]), ["dashboard"])
-#   listener_arn = aws_lb_listener.app_listener_https_secure.arn
-#   priority     = each.key == "books" ? 10 : 20
-
-#   action {
-#     type             = "forward"
-#     target_group_arn = aws_lb_target_group.app_tg[each.key].arn
-#   }
-
-#   condition {
-#     host_header {
-#       values = ["${each.key}.${var.domain_name}"]
-#     }
-#   }
-#   # # Condition 1: Match the specific domain (Optional but recommended)
-#   # condition {
-#   #   host_header {
-#   #     values = ["www.${var.domain_name}", var.domain_name]
-#   #   }
-#   # }
-
-#   # # Condition 2: Match the path
-#   # condition {
-#   #   path_pattern {
-#   #     # Matches exactly "/books" and anything under it like "/books/123"
-#   #     values = ["/${each.key}", "/${each.key}/*", "/${each.key}*"] 
-#   #   }
-#   # }
-# }
 #---------------------------------------------
 # 10. ECS Task Definition
 #---------------------------------------------
-# resource "aws_ecs_task_definition" "app_task" {
-#   for_each                 = toset(["books", "authors", "dashboard"])
-#   family                   = "lirwEcr-task-${local.env_suffix}"
-#   # network_mode             = "host"
-#   # network_mode             = "bridge"
-#   network_mode             = "awsvpc"
-#   requires_compatibilities = ["EC2"] # Changed from FARGATE
-#   cpu                      = var.app_cpu
-#   memory                   = var.app_memory
-#   memoryReservation        = var.app_memory_soft_limit
-#   execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
-#   task_role_arn            = aws_iam_role.ecs_task_role.arn 
 
-#   container_definitions = jsonencode([
-#     {
-#       name      = "lirwEcr"
-#       # image     = "${aws_ecr_repository.app_repo.repository_url}:latest" 
-#       image     = "httpd:2.4-alpine" # Bootstrapping image
-#       essential = true
-
-#       portMappings = [{
-#         containerPort = 3200
-#         protocol      = "tcp"
-#       }]
-
-      
-#       # Only the dashboard gets these variables
-#       environment = each.key == "dashboard" ? [
-#         {
-#           name  = "BOOKS_API_URL"
-#           value = "http://books.${var.domain_name}"
-#         },
-#         {
-#           name  = "AUTHORS_API_URL"
-#           value = "http://authors.${var.domain_name}"
-#         }
-#       ] : [] # Returns an empty list for books and authors
-
-
-#       logConfiguration = {
-#         logDriver = "awslogs"
-#         options = {
-#           awslogs-group         = aws_cloudwatch_log_group.ecs_log_group.name
-#           awslogs-region        = var.region
-#           awslogs-stream-prefix = "ecs"
-#         }
-#       }
-#     }
-#   ])
-# }
-
-
-# resource "aws_ecs_task_definition" "app_task" {
-  # for_each = {
-  #   books     = { port = 3300 }
-  #   authors   = { port = 3400 }
-  #   dashboard = { port = 3200 }
-  # }
-#   for_each         = local.services
-#   family                   = "lirwEcr-task-${each.key}"
-#   # network_mode             = "awsvpc"
-#   network_mode             = "bridge"
-#   # network_mode             = "host"
-#   requires_compatibilities = ["EC2"]
-#   cpu                      = var.app_cpu
-#   memory                   = var.app_memory
-#   execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
-#   task_role_arn            = aws_iam_role.ecs_task_role.arn
-
-#   # This reads your JSON file and injects the variables
-#   container_definitions = templatefile("${path.module}/task-definition.json.template", {
-#     SERVICE_NAME     = each.key
-#     APP_PORT         = each.value.port
-#     # ACCOUNT_ID       = data.aws_caller_identity.current.account_id
-#     ACCOUNT_ID       = var.account_id
-#     APP_CPU          = var.app_cpu
-#     APP_MEMORY       = var.app_memory
-#     ENV_VAR          = local.env_suffix
-#     # Initial bootstrap env; CI/CD will handle the real ones later
-#     ENVIRONMENT_VARS = each.key == "dashboard" ? jsonencode([
-#       { name = "BOOKS_SERVICE_URL", value = "https://books.${var.domain_name}" },
-#       { name = "AUTHORS_SERVICE_URL", value = "https://authors.${var.domain_name}" }
-#       # { name = "AUTHORS_SERVICE_URL", valueFrom = aws_secretsmanager_secret.app_secret.arn }
-#     ]) : "[]"
-#   })
-  
-#     lifecycle {
-#     ignore_changes = [
-#       container_definitions
-      
-#     ]
-#   }
-
-# }
 
 resource "aws_ecs_task_definition" "backend" {
   family                   = "lirw-ecr-backend"
@@ -1167,7 +977,6 @@ resource "aws_ecs_task_definition" "backend" {
       ]
 
       healthCheck = {
-        # command     = ["CMD-SHELL", "echo 'db.runCommand(\"ping\").ok' | mongosh localhost:27017/test --quiet"]
         command     = ["CMD-SHELL", "wget --no-verbose --tries=3 --spider http://127.0.0.1:3200/health || exit 1"]
         interval    = 10
         timeout     = 5
@@ -1185,12 +994,12 @@ resource "aws_ecs_task_definition" "backend" {
       }
     }
   ])
-  #   lifecycle {
-  #   ignore_changes = [
-  #     # container_definitions,
-  #     # desired_count
-  #   ]
-  # }
+    lifecycle {
+    ignore_changes = [
+      container_definitions,
+      # desired_count
+    ]
+  }
 
 }
 
@@ -1238,7 +1047,6 @@ resource "aws_ecs_task_definition" "app" {
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          # "awslogs-group"         = "/aws/ec2/nextjs-task-manager-app"
           "awslogs-group"         = "/ecs/lirwEcr-frontend-${local.env_suffix}"
           "awslogs-region"        = var.region
           "awslogs-stream-prefix" = "ecs"
@@ -1257,112 +1065,18 @@ resource "aws_ecs_task_definition" "app" {
 #---------------------------------------------
 # 11. ECS Service
 #---------------------------------------------
-# resource "aws_ecs_service" "app_service" {
-#   name             = "lirwEcr-service-${local.env_suffix}"
-#   cluster          = aws_ecs_cluster.app_cluster.id
-#   task_definition  = aws_ecs_task_definition.app_task.arn
-#   desired_count    = var.desired_count
-
-#   # ADD THIS: Force Terraform to give up faster if AWS hangs
-#   timeouts {
-#     delete = "5m" 
-#   }
-#   # Removed launch_type = "FARGATE", replaced with Capacity Provider Strategy
-#   capacity_provider_strategy {
-#     capacity_provider = aws_ecs_capacity_provider.ec2_provider.name
-#     weight            = 100
-#   }
-
-#   # this only works for awsvpc network mode not host network mode
-#   network_configuration {
-#     # subnets          = [aws_subnet.pub_sub_1a.id, aws_subnet.pub_sub_2b.id] 
-#     subnets          = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id] 
-#     security_groups  = [aws_security_group.app_task_sg.id]
-#     assign_public_ip = false 
-#     # assign_public_ip = true # it only works with fargate
-#   }
-
-#   # ADD THIS LINE: Give the container 60 seconds to boot before the ALB checks it
-#   health_check_grace_period_seconds = 60
-
-#   load_balancer {
-#     target_group_arn = aws_lb_target_group.app_tg.arn
-#     container_name   = "lirwEcr"
-#     container_port   = 3200
-#   }
-
-#   deployment_minimum_healthy_percent = 100 
-#   deployment_maximum_percent         = 200
-
-#   lifecycle {
-#     ignore_changes = [
-#       task_definition,
-#       desired_count
-#     ]
-#   }
-
-#   depends_on = [
-#     aws_lb_listener.app_listener_https_secure,
-#     aws_ecs_cluster_capacity_providers.cluster_attach # Ensure CP is attached before Service uses it
-#   ]
-# }
-
-
-# resource "aws_ecs_service" "app_service" {
-#   for_each         = local.services
-#   name             = "${each.key}-service-${local.env_suffix}"
-#   cluster          = aws_ecs_cluster.app_cluster.id
-#   # References the specific task definition created for this service
-#   task_definition  = aws_ecs_task_definition.app_task[each.key].arn
-#   desired_count    = var.desired_count
-
-#   timeouts {
-#     delete = "5m" 
-#   }
-
-#   capacity_provider_strategy {
-#     capacity_provider = aws_ecs_capacity_provider.ec2_provider.name
-#     weight            = 100
-#   }
-
-
-#   health_check_grace_period_seconds = 60
-
-#   load_balancer {
-#     # Assuming your target groups are named similarly: dashboard-tg, books-tg, etc.
-#     target_group_arn = aws_lb_target_group.app_tg[each.key].arn
-#     container_name   = "lirwEcr-${each.key}" # Matches the name in your JSON template
-#     container_port   = each.value.port
-#   }
-
-#   deployment_minimum_healthy_percent = 100 
-#   deployment_maximum_percent         = 200
-
-  # lifecycle {
-  #   ignore_changes = [
-  #     task_definition,
-  #     desired_count
-  #   ]
-  # }
-
-#   depends_on = [
-#     aws_lb_listener.app_listener_https_secure,
-#     aws_ecs_cluster_capacity_providers.cluster_attach
-#   ]
-# }
-
 
 
 # The Internal Network Load Balancer
 resource "aws_lb" "backend_internal" {
   name               = "backend-internal-nlb-${local.env_suffix}"
-  internal           = false
+  internal           = true
   load_balancer_type = "application"
   enable_cross_zone_load_balancing = true
   
   # Deploy this in your private subnets
-  # subnets            = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id]
-  subnets            = [aws_subnet.pub_sub_1a.id, aws_subnet.pub_sub_2b.id]
+  subnets            = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id]
+  # subnets            = [aws_subnet.pub_sub_1a.id, aws_subnet.pub_sub_2b.id]
 
   # AWS recently added Security Group support for NLBs. 
   # This ensures only your App tier can talk to the database tier.
@@ -1372,7 +1086,8 @@ resource "aws_lb" "backend_internal" {
 # The TCP Listener
 resource "aws_lb_listener" "backend_listener" {
   load_balancer_arn = aws_lb.backend_internal.arn
-  port              = "3200"
+  # port              = "3200"
+  port              = "80"
   protocol          = "HTTP"
 
   default_action {
@@ -1386,7 +1101,7 @@ resource "aws_lb_listener" "backend_listener" {
 # The Target Group for the Internal NLB (TCP Traffic)
 resource "aws_lb_target_group" "backend_internal" {
   name     = "backend-internal-tg"
-  port     = 4000
+  port     = 3200
   protocol = "HTTP" # Crucial for MongoDB
   vpc_id   = aws_vpc.vpc.id
   # target_type = "ip" # Must be 'ip' when using awsvpc network mode
@@ -1503,7 +1218,7 @@ resource "aws_lb_listener" "app_listener_https_secure" {
 #################
 # The Target Group for the External ALB (HTTP Traffic)
 resource "aws_lb_target_group" "app_external" {
-  name     = "nextjs-app-tg"
+  name     = "lirw-frontend-tg"
   port     = 80
   protocol = "HTTP"
   vpc_id   = aws_vpc.vpc.id

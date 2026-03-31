@@ -6,8 +6,9 @@
 
 CLUSTER_NAME="ecs-cluster-dev"
 # Define your services as an array
-SERVICES=("nextjs-app-service" "mongodb-service" )
-ASG_NAME="ecs-asg-dev"
+SERVICES=("backend-service" "frontend-service" )
+# ASG_NAME="ecs-asg-dev"
+ASG_NAME=("ecs-asg-backend-dev" "ecs-asg-frontend-dev" )
 REGION="us-east-1"
 
 echo "======================================================"
@@ -62,50 +63,52 @@ done
 
 
 # Step 3: Terminate the EC2 Instances
-echo "3️⃣ Scaling Auto Scaling Group ($ASG_NAME) to 0 instances..."
-aws autoscaling update-auto-scaling-group \
-  --auto-scaling-group-name "$ASG_NAME" \
-  --min-size 0 \
-  --max-size 0 \
-  --desired-capacity 0 \
-  --region "$REGION" > /dev/null
+# Step 3: Terminate the EC2 Instances for each ASG
+echo "3️⃣ Scaling Auto Scaling Groups to 0 instances..."
 
-if [ $? -ne 0 ]; then
-  echo "⚠️ Failed to update ASG. It may have already been deleted."
-else
-  echo "✅ EC2 instances are terminating..."
-  # Give AWS a few seconds to register the termination state before Terraform hits the API
-  sleep 10
-fi
+for ASG_NAME in "${ASG_NAMES[@]}"; do
+  echo "--- Processing ASG: $ASG_NAME ---"
 
-# Extract the raw Instance IDs attached to the ASG
-INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
-  --auto-scaling-group-names "$ASG_NAME" \
-  --region "$REGION" \
-  --query 'AutoScalingGroups[0].Instances[*].InstanceId' \
-  --output text)
-
-if [ -n "$INSTANCE_IDS" ] && [ "$INSTANCE_IDS" != "None" ]; then
-  echo "   🔥 Target(s) acquired: $INSTANCE_IDS"
-  echo "   ☠️  Sending termination signal..."
-  
-  # Forcefully terminate the instances via EC2 API
-  aws ec2 terminate-instances \
-    --instance-ids $INSTANCE_IDS \
+  # Scale the ASG to 0
+  aws autoscaling update-auto-scaling-group \
+    --auto-scaling-group-name "$ASG_NAME" \
+    --min-size 0 \
+    --max-size 0 \
+    --desired-capacity 0 \
     --region "$REGION" > /dev/null
-    
-  echo "   ⏳ Waiting for AWS to confirm termination (usually takes ~30 seconds)..."
-  
-  # This command pauses the script until AWS confirms the instances are physically dead
-  aws ec2 wait instance-terminated \
-    --instance-ids $INSTANCE_IDS \
-    --region "$REGION"
-    
-  echo "   ✅ All EC2 instances successfully destroyed."
-else
-  echo "   ✅ No running instances found."
-fi
 
+  if [ $? -ne 0 ]; then
+    echo "  ⚠️ Failed to update $ASG_NAME. It may not exist."
+    continue # Skip to the next ASG in the array
+  else
+    echo "  ✅ $ASG_NAME scaled to 0."
+  fi
+
+  # Extract Instance IDs for this specific ASG
+  INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
+    --auto-scaling-group-names "$ASG_NAME" \
+    --region "$REGION" \
+    --query 'AutoScalingGroups[0].Instances[*].InstanceId' \
+    --output text)
+
+  if [ -n "$INSTANCE_IDS" ] && [ "$INSTANCE_IDS" != "None" ]; then
+    echo "  🔥 Target(s) acquired in $ASG_NAME: $INSTANCE_IDS"
+    
+    # Forcefully terminate the instances
+    aws ec2 terminate-instances \
+      --instance-ids $INSTANCE_IDS \
+      --region "$REGION" > /dev/null
+      
+    echo "  ⏳ Waiting for termination confirmation..."
+    aws ec2 wait instance-terminated \
+      --instance-ids $INSTANCE_IDS \
+      --region "$REGION"
+      
+    echo "  ✅ Instances in $ASG_NAME destroyed."
+  else
+    echo "  ✅ No running instances found in $ASG_NAME."
+  fi
+done
 # Step 3: Trigger Terraform
 echo "======================================================"
 echo " 🌪️  Infrastructure is clear. Triggering Terraform... "
