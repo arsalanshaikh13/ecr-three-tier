@@ -269,7 +269,7 @@ jobs:
       #   run: |
       #     # 1. Look up the Backend Security Group by its Name tag
       #     SG_ID=$(aws ec2 describe-security-groups \
-      #       --filters "Name=group-name,Values=ecs-node-backend-sg-${{ vars.ENV_VAR }}" \
+      #       --filters "Name=group-name,Values=ecs-node-backend-sg-vars.ENV_VAR" \
       #       --query "SecurityGroups[0].GroupId" \
       #       --output text)
 
@@ -287,9 +287,45 @@ jobs:
       #     echo "sg_id=$SG_ID" >> $GITHUB_OUTPUT
       #     echo "subnets=$SUBNETS" >> $GITHUB_OUTPUT
 
-      - name: Trigger ECS Run-Task for Seeding
+      # - name: Trigger ECS Run-Task for Seeding
+      #   run: |
+      #     aws ecs run-task \
+      #       --cluster ${{ env.ECS_CLUSTER }} \
+      #       --task-definition ${{ steps.register-task-def.outputs.task_def_arn }} \
+      #       --launch-type EC2
+      - name: Trigger and Wait for ECS DB Seeding
         run: |
-          aws ecs run-task \
+          echo "Starting DB Seeding Task..."
+
+          # 1. Run the task and capture the Task ARN
+          TASK_ARN=$(aws ecs run-task \
             --cluster ${{ env.ECS_CLUSTER }} \
             --task-definition ${{ steps.register-task-def.outputs.task_def_arn }} \
-            --launch-type EC2
+            --launch-type EC2 \
+            --query "tasks[0].taskArn" \
+            --output text)
+            
+          echo "Task started with ARN: $TASK_ARN"
+          echo "Waiting for task to complete..."
+
+          # 2. Wait for the task to reach the 'STOPPED' state
+          aws ecs wait tasks-stopped \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --tasks $TASK_ARN
+            
+          echo "Task has stopped. Checking exit code..."
+
+          # 3. Retrieve the exit code to ensure it didn't crash
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --tasks $TASK_ARN \
+            --query "tasks[0].containers[0].exitCode" \
+            --output text)
+            
+          if [ "$EXIT_CODE" = "0" ]; then
+            echo "✅ Database seeding completed successfully!"
+          else
+            echo "❌ Database seeding FAILED with exit code: $EXIT_CODE"
+            echo "Check ECS CloudWatch logs for the exact SQL error."
+            exit 1 # This forces the GitHub Actions workflow to fail
+          fi
