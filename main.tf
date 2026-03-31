@@ -557,14 +557,14 @@ resource "aws_security_group" "ecs_node_rds_sg" {
     security_groups = [aws_security_group.ecs_node_backend_sg.id]
   }
   # Add this block to allow Frontend nodes to reach RDS (so the seeder works anywhere)
-  ingress {
-    description     = "Allow Frontend nodes to reach RDS for DB Seeding"
-    from_port       = 3306
-    to_port         = 3306
-    protocol        = "tcp"
-    # Replace this with your actual frontend node SG reference:
-    security_groups = [aws_security_group.ecs_node_frontend_sg.id] 
-  }
+  # ingress {
+  #   description     = "Allow Frontend nodes to reach RDS for DB Seeding"
+  #   from_port       = 3306
+  #   to_port         = 3306
+  #   protocol        = "tcp"
+  #   # Replace this with your actual frontend node SG reference:
+  #   security_groups = [aws_security_group.ecs_node_frontend_sg.id] 
+  # }
 
   egress {
     from_port   = 0
