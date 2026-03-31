@@ -248,7 +248,7 @@ seed-database:
   rules:
     # 1. Target ONLY the database-seeder matrix instance
     # 2. ONLY run if the $SEED_DATABASE variable evaluated to "true"
-    - if: '$SERVICE == "seed-database" && $SEED_DATABASE == "true"'
+    - if: '$SERVICE == "seed-database" || $SEED_DATABASE == "true"'
   before_script:
     - apk add --no-cache aws-cli
     - !reference [.aws_oidc_login, script]
