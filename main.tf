@@ -438,13 +438,13 @@ resource "aws_security_group" "ecs_node_frontend_sg" {
   }
 
 # 1. Existing Rule: Allow Public ALB to hit Ephemeral Ports
-  ingress {
-    description     = "node port access from ALB"
-    from_port       = 32768
-    to_port         = 65535
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb_sg.id]
-  }
+  # ingress {
+  #   description     = "node port access from ALB"
+  #   from_port       = 32768
+  #   to_port         = 65535
+  #   protocol        = "tcp"
+  #   security_groups = [aws_security_group.alb_sg.id]
+  # }
   # ingress {
   #   description     = "node port access from ALB"
   #   from_port       = 3000
@@ -506,13 +506,13 @@ resource "aws_security_group" "ecs_node_backend_sg" {
     security_groups = [aws_security_group.internal_alb_sg.id]
   }
 
-  ingress {
-    description     = "node port access from ALB"
-    from_port       = 32768
-    to_port         = 65535
-    protocol        = "tcp"
-    security_groups = [aws_security_group.internal_alb_sg.id]
-  }
+  # ingress {
+  #   description     = "node port access from ALB"
+  #   from_port       = 32768
+  #   to_port         = 65535
+  #   protocol        = "tcp"
+  #   security_groups = [aws_security_group.internal_alb_sg.id]
+  # }
   # # 3. NEW: The Hairpin Fix (Self-Referencing)
   # # Allows containers on the same EC2 node to talk to each other
   # ingress {
@@ -732,7 +732,8 @@ locals {
   ecs_apps = {
     frontend = {
       instance_type = "c7i-flex.large"
-      subnets       = [aws_subnet.pub_sub_1a.id, aws_subnet.pub_sub_2b.id]
+      # subnets       = [aws_subnet.pub_sub_1a.id, aws_subnet.pub_sub_2b.id]
+      subnets       = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id]
       sg_id         = aws_security_group.ecs_node_frontend_sg.id
     }
     backend = {
@@ -934,8 +935,9 @@ resource "aws_route53_record" "subdomain_alias" {
 
 resource "aws_ecs_task_definition" "backend" {
   family                   = "lirw-ecr-backend"
-  network_mode             = "bridge"
+  # network_mode             = "bridge"
   # network_mode             = "host"
+  network_mode             = "awsvpc"
   requires_compatibilities = ["EC2"]
   execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
   task_role_arn            = aws_iam_role.ecs_task_role.arn
@@ -1026,7 +1028,8 @@ resource "aws_ecs_task_definition" "backend" {
 
 resource "aws_ecs_task_definition" "app" {
   family                   = "lirw-ecr-frontend"
-  network_mode             = "bridge"
+  # network_mode             = "bridge"
+  network_mode             = "awsvpc"
   # network_mode             = "host"
   requires_compatibilities = ["EC2"]
   execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
@@ -1125,8 +1128,8 @@ resource "aws_lb_target_group" "backend_internal" {
   port     = 3200
   protocol = "HTTP" # Crucial for MongoDB
   vpc_id   = aws_vpc.vpc.id
-  # target_type = "ip" # Must be 'ip' when using awsvpc network mode
-  target_type = "instance" # Must be 'instance' when using host/bridge network mode
+  target_type = "ip" # Must be 'ip' when using awsvpc network mode
+  # target_type = "instance" # Must be 'instance' when using host/bridge network mode
 
   # ADD THIS LINE: Lower the wait time from 5 minutes to 30 seconds
   deregistration_delay = 30
@@ -1169,6 +1172,16 @@ resource "aws_ecs_service" "backend" {
     base              = 1
 
   }
+
+    # this only works for awsvpc network mode not host network mode
+  network_configuration {
+    # subnets          = [aws_subnet.pub_sub_1a.id, aws_subnet.pub_sub_2b.id] 
+    subnets          = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id] 
+    security_groups  = [aws_security_group.ecs_node_backend_sg.id]
+    assign_public_ip = false 
+    # assign_public_ip = true # it only works with fargate
+  }
+
 
   health_check_grace_period_seconds = 60
 
@@ -1243,8 +1256,8 @@ resource "aws_lb_target_group" "app_external" {
   port     = 80
   protocol = "HTTP"
   vpc_id   = aws_vpc.vpc.id
-    # target_type = "ip" # Must be 'ip' when using awsvpc network mode
-  target_type = "instance" # Must be 'instance' when using host/bridge network mode
+    target_type = "ip" # Must be 'ip' when using awsvpc network mode
+  # target_type = "instance" # Must be 'instance' when using host/bridge network mode
   # ADD THIS LINE: Lower the wait time from 5 minutes to 30 seconds
   deregistration_delay = 30
 
@@ -1291,6 +1304,14 @@ resource "aws_ecs_service" "app" {
 
   }
 
+  # this only works for awsvpc network mode not host network mode
+  network_configuration {
+    # subnets          = [aws_subnet.pub_sub_1a.id, aws_subnet.pub_sub_2b.id] 
+    subnets          = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id] 
+    security_groups  = [aws_security_group.ecs_node_frontend_sg.id]
+    assign_public_ip = false 
+    # assign_public_ip = true # it only works with fargate
+  }
 
   health_check_grace_period_seconds = 60
 
