@@ -27,9 +27,18 @@ variables:
   BUILD_BACKEND:
     value: "false"
     description: "Set to 'true' to build backend image, otherwise fetches latest"
+  GET_BACKEND:
+    value: "false"
+    description: "Set to 'true' to get backend image from ecr & Push"
+  GET_FRONTEND:
+    value: "false"
+    description: "Set to 'true' to get frontend image from ecr & Push"
   SEED_DATABASE:
     value: "false"
     description: "Set to 'true' to seed Database from ci cd pipeline"
+  GET_SEED_IMAGE:
+    value: "false"
+    description: "Set to 'true' to get seed Database image from ci cd pipeline"
 
 # ---------------------------------------------------------
 # GLOBAL CONFIGURATION
@@ -62,20 +71,23 @@ default:
         ECR_REPOSITORY: "lirw-ecr-frontend-repo-$ENV_VAR"
         TASK_FAMILY: "lirw-ecr-frontend"
         ECS_SERVICE_NAME: "frontend-service"
-        VAR_NAME: "BUILD_FRONTEND"
+        BUILD_NAME: "BUILD_FRONTEND"
+        GET_NAME: "GET_FRONTEND"
         DOCKERFILE: Dockerfile
       - SERVICE: "backend"
         BUILD_DIR: "lirw-three-tier/backend"
         ECR_REPOSITORY: "lirw-ecr-backend-repo-$ENV_VAR"
         TASK_FAMILY: "lirw-ecr-backend"
         ECS_SERVICE_NAME: "backend-service"
-        VAR_NAME: "BUILD_BACKEND"
+        BUILD_NAME: "BUILD_BACKEND"
+        GET_NAME: "GET_BACKEND"
         DOCKERFILE: Dockerfile
-      - SERVICE: "seed-database"
+      - SERVICE: "seed_database"
         BUILD_DIR: "lirw-three-tier/database-seeder"
         ECR_REPOSITORY: "lirw-ecr-database-seed-repo-$ENV_VAR"
         TASK_FAMILY: "db-seeder-$ENV_VAR"
-        VAR_NAME: "SEED_DATABASE"
+        BUILD_NAME: "SEED_DATABASE"
+        GET_NAME: "GET_SEED_IMAGE"
         DOCKERFILE: db.Dockerfile
 
 # ---------------------------------------------------------
@@ -100,8 +112,8 @@ detect-changes:
     - |
       # Check if this specific service's directory has changes
       if grep -q "$BUILD_DIR" changed_files.txt; then 
-        echo "${VAR_NAME}=true" >> build-${SERVICE}.env
-        echo "✅ Changes detected in $SERVICE. Setting $VAR_NAME=true"
+        echo "${BUILD_NAME}=true" >> build-${SERVICE}.env
+        echo "✅ Changes detected in $SERVICE. Setting $BUILD_NAME=true"
       else
         echo "No changes in $SERVICE."
       fi
@@ -109,16 +121,7 @@ detect-changes:
     reports:
       # GitLab will automatically merge the dotenv files from all 3 matrix jobs
       dotenv: build-${SERVICE}.env
-# ---------------------------------------------------------
-# HIDDEN HELPER: Setup Build Environment
-# ---------------------------------------------------------
-.setup_build_env:
-  script:
-    - apk add --no-cache aws-cli
-    # 1. Dynamically evaluate the variable name stored in $VAR_NAME (e.g., $BUILD_FRONTEND)
-    - eval export SHOULD_BUILD=\$${VAR_NAME}
-    # 2. If the variable is empty (meaning no changes were detected), default it to "false"
-    - export SHOULD_BUILD=${SHOULD_BUILD:-false}
+
 # ---------------------------------------------------------
 # STAGE 1: BUILD & PUSH
 # ---------------------------------------------------------
@@ -136,15 +139,17 @@ build_image:
     - apk add --no-cache aws-cli
     - !reference [.aws_oidc_login, script]
 
-    # 1. Dynamically evaluate the variable name stored in $VAR_NAME (e.g., $BUILD_FRONTEND)
-    - eval "export SHOULD_BUILD=\$${VAR_NAME}"
+    # 1. Dynamically evaluate the variable name stored in $BUILD_NAME (e.g., $BUILD_FRONTEND)
+    - eval "export SHOULD_BUILD=\$${BUILD_NAME}"
+    # 1. Dynamically evaluate the variable name stored in $GET_NAME (e.g., $GET_FRONTEND)
+    - eval "export SHOULD_GET=\$${GET_NAME}"
 
     # 2. If the variable is empty (meaning no changes were detected), default it to "false"
     - export SHOULD_BUILD=${SHOULD_BUILD:-false}
+    - export SHOULD_GET=${SHOULD_GET:-false}
 
   script:
     - ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-
     - |
       if [ "$SHOULD_BUILD" == "true" ]; then
         echo "🏗️ Building Docker Image for $SERVICE..."
@@ -158,7 +163,9 @@ build_image:
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
         
         FINAL_IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-      else
+
+      # FIXED: Added Bash test brackets [ ] and the 'then' keyword
+      elif [ "$CI_PIPELINE_SOURCE" == "web" && "$SHOULD_GET" == "true" ]; then
         echo "🔍 No changes detected. Fetching latest tag from ECR for $SERVICE..."
         FETCHED_TAG=$(aws ecr describe-images --repository-name $ECR_REPOSITORY --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags[0]' --output text)
         
@@ -167,6 +174,10 @@ build_image:
         fi
         
         FINAL_IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$FETCHED_TAG"
+
+      else
+        echo "⏭️ No changes detected, so no build is required."
+        exit 0
       fi
 
     - echo "✅ Resolved Image $FINAL_IMAGE"
@@ -248,7 +259,7 @@ seed-database:
   rules:
     # 1. Target ONLY the database-seeder matrix instance
     # 2. ONLY run if the $SEED_DATABASE variable evaluated to "true"
-    - if: '$SERVICE == "seed-database" || $SEED_DATABASE == "true"'
+    - if: '$SERVICE == "seed-database" || $SEED_DATABASE == "true" || $GET_SEED_IMAGE == "true"'
   before_script:
     - apk add --no-cache aws-cli
     - !reference [.aws_oidc_login, script]
