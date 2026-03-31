@@ -99,7 +99,7 @@ detect-changes:
     - git diff --name-only $CI_COMMIT_BEFORE_SHA $CI_COMMIT_SHA > changed_files.txt
     - |
       # Check if this specific service's directory has changes
-      if grep -q "$DIR_PATH" changed_files.txt; then 
+      if grep -q "$BUILD_DIR" changed_files.txt; then 
         echo "${VAR_NAME}=true" >> build-${SERVICE}.env
         echo "✅ Changes detected in $SERVICE. Setting $VAR_NAME=true"
       else
