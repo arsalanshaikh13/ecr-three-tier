@@ -201,6 +201,7 @@ prepare_manifest:
   script:
     # Read the exact artifact for this specific service
     - FINAL_IMAGE_URI=$(cat ${SERVICE}-image.txt)
+
     - echo "Updating task definition for $SERVICE using image $FINAL_IMAGE_URI"
 
     - aws ecs describe-task-definition --task-definition $TASK_FAMILY --query taskDefinition > task-def.json
@@ -260,6 +261,9 @@ seed-database:
     # 1. Target ONLY the database-seeder matrix instance
     # 2. ONLY run if the $SEED_DATABASE variable evaluated to "true"
     - if: '$SERVICE == "seed-database" || $SEED_DATABASE == "true" || $GET_SEED_IMAGE == "true"'
+      when: on_success
+      # 3. Otherwise, do not run this job
+    - when: never
   before_script:
     - apk add --no-cache aws-cli
     - !reference [.aws_oidc_login, script]
