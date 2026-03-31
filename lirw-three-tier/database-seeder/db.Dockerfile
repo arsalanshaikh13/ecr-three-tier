@@ -12,6 +12,9 @@ COPY script.sh /scripts/script.sh
 # Give execution permission to the script
 RUN chmod +x /scripts/script.sh
 
+# OVERRIDE the default MySQL server entrypoint!
+# This forces Docker to just treat this as a normal Linux container.
+ENTRYPOINT ["/bin/bash"]
 
 # Use a shell script as the CMD to allow for better error logging
 # ECS will inject DB_HOST, DB_USER, and DB_PASSWORD as Env Vars
