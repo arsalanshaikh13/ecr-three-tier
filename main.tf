@@ -429,22 +429,22 @@ resource "aws_security_group" "ecs_node_frontend_sg" {
   description = "SG for ECS EC2 nodes frontend"
   vpc_id      = aws_vpc.vpc.id
   
-  ingress {
-    description = "node port access"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    security_groups = [aws_security_group.alb_sg.id]
-  }
-
-# 1. Existing Rule: Allow Public ALB to hit Ephemeral Ports
   # ingress {
-  #   description     = "node port access from ALB"
-  #   from_port       = 32768
-  #   to_port         = 65535
-  #   protocol        = "tcp"
+  #   description = "node port access"
+  #   from_port   = 80
+  #   to_port     = 80
+  #   protocol    = "tcp"
   #   security_groups = [aws_security_group.alb_sg.id]
   # }
+
+# 1. Existing Rule: Allow Public ALB to hit Ephemeral Ports
+  ingress {
+    description     = "node port access from ALB"
+    from_port       = 32768
+    to_port         = 65535
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb_sg.id]
+  }
   # ingress {
   #   description     = "node port access from ALB"
   #   from_port       = 3000
@@ -498,10 +498,17 @@ resource "aws_security_group" "ecs_node_backend_sg" {
   
     # 2. NEW: Allow the Internal NLB to route traffic to the Mongo Container
 
+  # ingress {
+  #   description = "node port access"
+  #   from_port   = 3200
+  #   to_port     = 3200
+  #   protocol    = "tcp"
+  #   security_groups = [aws_security_group.internal_alb_sg.id]
+  # }
   ingress {
     description = "node port access"
-    from_port   = 3200
-    to_port     = 3200
+    from_port   = 32768
+    to_port     = 65535
     protocol    = "tcp"
     security_groups = [aws_security_group.internal_alb_sg.id]
   }
@@ -642,7 +649,8 @@ output "rds_endpoint" {
 resource "aws_ecs_task_definition" "db_seeder" {
   family                   = "db-seeder-${local.env_suffix}"
   requires_compatibilities = ["EC2"]
-  network_mode             = "host" # Required for security group assignment
+  # network_mode             = "host" # Required for security group assignment
+  network_mode             = "bridge" # Required for security group assignment
   cpu                      = var.db_cpu
   memory                   = var.db_memory
   execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
@@ -916,7 +924,8 @@ resource "aws_route53_record" "subdomain_alias" {
 resource "aws_ecs_task_definition" "backend" {
   family                   = "lirw-ecr-backend"
   # network_mode             = "bridge"
-  network_mode             = "host"
+  # network_mode             = "host"
+  network_mode             = "bridge"
   requires_compatibilities = ["EC2"]
   execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
   task_role_arn            = aws_iam_role.ecs_task_role.arn
@@ -1007,8 +1016,8 @@ resource "aws_ecs_task_definition" "backend" {
 
 resource "aws_ecs_task_definition" "app" {
   family                   = "lirw-ecr-frontend"
-  # network_mode             = "bridge"
-  network_mode             = "host"
+  network_mode             = "bridge"
+  # network_mode             = "host"
   requires_compatibilities = ["EC2"]
   execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
   task_role_arn            = aws_iam_role.ecs_task_role.arn
