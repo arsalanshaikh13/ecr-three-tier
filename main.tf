@@ -666,8 +666,10 @@ resource "aws_ecs_task_definition" "db_seeder" {
         { name = "DB_HOST", valueFrom = aws_ssm_parameter.rds_db_address.arn }
       ]
 
-      log_configuration = {
-        log_driver = "awslogs"
+      # switch to camel case for jsonencode from snake_case otherwise cloudwatch log doesn't get created
+      # Changed to camelCase for AWS API compatibility
+      logConfiguration = {
+        logDriver = "awslogs"
         options = {
           "awslogs-group"         = "/ecs/lirwEcr-database-seeder-${local.env_suffix}"
           "awslogs-region"        = "us-east-1"
