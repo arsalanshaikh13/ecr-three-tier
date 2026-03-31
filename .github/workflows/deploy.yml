@@ -264,28 +264,28 @@ jobs:
             
           echo "task_def_arn=$NEW_TASK_DEF_ARN" >> $GITHUB_OUTPUT
 
-      # - name: Fetch Network IDs via AWS CLI
-      #   id: lookup
-      #   run: |
-      #     # 1. Look up the Backend Security Group by its Name tag
-      #     SG_ID=$(aws ec2 describe-security-groups \
-      #       --filters "Name=group-name,Values=ecs-node-backend-sg-vars.ENV_VAR" \
-      #       --query "SecurityGroups[0].GroupId" \
-      #       --output text)
+      - name: Fetch Network IDs via AWS CLI
+        id: lookup
+        run: |
+          # 1. Look up the Backend Security Group by its Name tag
+          SG_ID=$(aws ec2 describe-security-groups \
+            --filters "Name=group-name,Values=ecs-node-backend-sg-vars.ENV_VAR" \
+            --query "SecurityGroups[0].GroupId" \
+            --output text)
 
-      #     # 2. Look up the Private Subnets by their Name tags
-      #     SUBNETS=$(aws ec2 describe-subnets \
-      #       --filters "Name=tag:Name,Values=pri-sub-*" \
-      #       --query 'Subnets[*].SubnetId' \
-      #       --output json | tr -d '\n' | tr -d ' ')
+          # 2. Look up the Private Subnets by their Name tags
+          SUBNETS=$(aws ec2 describe-subnets \
+            --filters "Name=tag:Name,Values=pri-sub-*" \
+            --query 'Subnets[*].SubnetId' \
+            --output json | tr -d '\n' | tr -d ' ')
 
-      #     if [ "$SG_ID" == "None" ] || [ -z "$SUBNETS" ]; then
-      #       echo "Error: Could not find Security Group or Subnets"
-      #       exit 1
-      #     fi
+          if [ "$SG_ID" == "None" ] || [ -z "$SUBNETS" ]; then
+            echo "Error: Could not find Security Group or Subnets"
+            exit 1
+          fi
 
-      #     echo "sg_id=$SG_ID" >> $GITHUB_OUTPUT
-      #     echo "subnets=$SUBNETS" >> $GITHUB_OUTPUT
+          echo "sg_id=$SG_ID" >> $GITHUB_OUTPUT
+          echo "subnets=$SUBNETS" >> $GITHUB_OUTPUT
 
       # - name: Trigger ECS Run-Task for Seeding
       #   run: |
@@ -293,6 +293,7 @@ jobs:
       #       --cluster ${{ env.ECS_CLUSTER }} \
       #       --task-definition ${{ steps.register-task-def.outputs.task_def_arn }} \
       #       --launch-type EC2
+
       - name: Trigger and Wait for ECS DB Seeding
         run: |
           echo "Starting DB Seeding Task..."
@@ -302,6 +303,12 @@ jobs:
             --cluster ${{ env.ECS_CLUSTER }} \
             --task-definition ${{ steps.register-task-def.outputs.task_def_arn }} \
             --launch-type EC2 \
+            --network-configuration '{
+              "awsvpcConfiguration": {
+                "subnets": ${{ steps.lookup.outputs.subnets }},
+                "securityGroups": ["${{ steps.lookup.outputs.sg_id }}"]
+                }
+              }' \ 
             --query "tasks[0].taskArn" \
             --output text)
             
@@ -329,3 +336,16 @@ jobs:
             echo "Check ECS CloudWatch logs for the exact SQL error."
             exit 1 # This forces the GitHub Actions workflow to fail
           fi
+
+      # - name: Trigger ECS Run-Task for Seeding
+      #   run: |
+      #     aws ecs run-task \
+      #       --cluster ${{ env.ECS_CLUSTER }} \
+      #       --task-definition db-seeder \
+      #       --launch-type EC2 \
+      #       --network-configuration '{
+      #         "awsvpcConfiguration": {
+      #           "subnets": ${{ steps.lookup.outputs.subnets }},
+      #           "securityGroups": ["${{ steps.lookup.outputs.sg_id }}"]
+      #         }
+      #       }'

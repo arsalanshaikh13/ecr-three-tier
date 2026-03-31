@@ -660,7 +660,8 @@ resource "aws_ecs_task_definition" "db_seeder" {
   family                   = "db-seeder-${local.env_suffix}"
   requires_compatibilities = ["EC2"]
   # network_mode             = "host" # Required for security group assignment
-  network_mode             = "bridge" # Required for security group assignment
+  # network_mode             = "bridge" # Required for security group assignment
+  network_mode             = "awsvpc" # Required for security group assignment
   cpu                      = var.db_cpu
   memory                   = var.db_memory
   execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
