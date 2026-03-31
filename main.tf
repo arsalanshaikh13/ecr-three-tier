@@ -718,8 +718,8 @@ locals {
     }
     backend = {
       instance_type = "c7i-flex.large"
-      subnets       = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id]
-      # subnets       = [aws_subnet.pub_sub_1a.id, aws_subnet.pub_sub_2b.id]
+      # subnets       = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id]
+      subnets       = [aws_subnet.pub_sub_1a.id, aws_subnet.pub_sub_2b.id]
       sg_id         = aws_security_group.ecs_node_backend_sg.id
     }
   }
@@ -1077,8 +1077,8 @@ resource "aws_lb" "backend_internal" {
   enable_cross_zone_load_balancing = true
   
   # Deploy this in your private subnets
-  subnets            = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id]
-  # subnets            = [aws_subnet.pub_sub_1a.id, aws_subnet.pub_sub_2b.id]
+  # subnets            = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id]
+  subnets            = [aws_subnet.pub_sub_1a.id, aws_subnet.pub_sub_2b.id]
 
   # AWS recently added Security Group support for NLBs. 
   # This ensures only your App tier can talk to the database tier.

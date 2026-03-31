@@ -8,7 +8,7 @@ CLUSTER_NAME="ecs-cluster-dev"
 # Define your services as an array
 SERVICES=("backend-service" "frontend-service" )
 # ASG_NAME="ecs-asg-dev"
-ASG_NAME=("ecs-asg-backend-dev" "ecs-asg-frontend-dev" )
+ASG_NAMES=("ecs-asg-backend-dev" "ecs-asg-frontend-dev" )
 REGION="us-east-1"
 
 echo "======================================================"

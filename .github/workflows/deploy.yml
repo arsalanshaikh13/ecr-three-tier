@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - public
     paths:
       - "lirw-three-tier/frontend/**"
       - "lirw-three-tier/backend/**"
