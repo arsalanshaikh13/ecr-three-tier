@@ -128,9 +128,14 @@ build_image:
   services:
     - docker:24.0.5-dind
   before_script:
-    # By making this purely references, we satisfy the strict array validator
-    - !reference [.setup_build_env, script]
+    - apk add --no-cache aws-cli
     - !reference [.aws_oidc_login, script]
+
+    # 1. Dynamically evaluate the variable name stored in $VAR_NAME (e.g., $BUILD_FRONTEND)
+    - eval export SHOULD_BUILD=\$${VAR_NAME}
+
+    # 2. If the variable is empty (meaning no changes were detected), default it to "false"
+    - export SHOULD_BUILD=${SHOULD_BUILD:-false}
 
   script:
     - ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
@@ -157,7 +162,7 @@ build_image:
         FINAL_IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$FETCHED_TAG"
       fi
 
-    - echo "✅ Resolved Image: $FINAL_IMAGE"
+    - echo "✅ Resolved Image $FINAL_IMAGE"
     - echo "$FINAL_IMAGE" > $CI_PROJECT_DIR/${SERVICE}-image.txt
   artifacts:
     paths:
