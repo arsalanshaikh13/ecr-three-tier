@@ -1,7 +1,9 @@
 stages:
+  - detect-changes
   - build
   - prepare
   - deploy
+  - seed-database
 
 # ---------------------------------------------------------
 # PIPELINE TRIGGER RULES
