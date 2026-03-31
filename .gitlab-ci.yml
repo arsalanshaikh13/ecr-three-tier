@@ -124,7 +124,7 @@ build_image:
   needs:
     - job: detect-changes
       artifacts: true
-      optional: true # CRITICAL: Prevents pipeline crash if detect-changes is skipped (e.g., manual UI triggers)
+      optional: true
   services:
     - docker:24.0.5-dind
   before_script:
