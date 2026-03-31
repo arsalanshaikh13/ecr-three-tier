@@ -253,7 +253,7 @@ seed-database:
         --query 'taskDefinition.taskDefinitionArn' \
         --output text)
 
-    - echo "Starting DB Seeding Task with ARN: $NEW_TASK_ARN..."
+    - echo "Starting DB Seeding Task with ARN $NEW_TASK_ARN..."
     - |
       TASK_ARN=$(aws ecs run-task \
         --cluster $ECS_CLUSTER \
