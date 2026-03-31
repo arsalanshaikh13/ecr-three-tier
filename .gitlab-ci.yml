@@ -59,13 +59,12 @@ default:
 # ---------------------------------------------------------
 # REUSABLE SCRIPT "FUNCTIONS"
 # ---------------------------------------------------------
-.scripts:
-  # 1. Setup & Auth
-  cli:
+.setup_cli:
+  script:
     - apk add --no-cache aws-cli jq
 
-  # 2. Build OR Fetch Image (Sets $FINAL_IMAGE)
-  resolve_image:
+.resolve_image:
+  script:
     - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
     - |
       if [ "$SHOULD_BUILD" == "true" ]; then
@@ -83,14 +82,12 @@ default:
       fi
       echo "✅ Using Image: $FINAL_IMAGE"
 
-  # 3. Update Task Definition (Uses $FINAL_IMAGE and outputs $NEW_TASK_ARN)
-  update_task_def:
+.update_task_def:
+  script:
     - echo "Updating Task Definition: $TASK_FAMILY..."
     - TASK_DEF_JSON=$(aws ecs describe-task-definition --task-definition $TASK_FAMILY --query taskDefinition)
-    # Fixed: Wrapped $TASK_DEF_JSON in quotes to prevent bash from breaking the JSON format
     - NEW_DEF=$(echo "$TASK_DEF_JSON" | jq --arg IMAGE "$FINAL_IMAGE" '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities)')
     - NEW_TASK_ARN=$(aws ecs register-task-definition --cli-input-json "$NEW_DEF" --query 'taskDefinition.taskDefinitionArn' --output text)
-
 # ---------------------------------------------------------
 # 1. DETECT CHANGES
 # ---------------------------------------------------------
@@ -127,11 +124,11 @@ detect-changes:
   services:
     - docker:24.0.5-dind
   before_script:
-    - !reference [.scripts, cli]
+    - !reference [.setup_cli, script]
     - !reference [.aws_oidc_login, script]
   script:
-    - !reference [.scripts, resolve_image]
-    - !reference [.scripts, update_task_def]
+    - !reference [.resolve_image, script]
+    - !reference [.update_task_def, script]
     - aws ecs update-service --cluster $ECS_CLUSTER --service $SERVICE_NAME --task-definition $NEW_TASK_ARN --force-new-deployment
     - aws ecs wait services-stable --cluster $ECS_CLUSTER --services $SERVICE_NAME
 
@@ -196,11 +193,11 @@ seed-database:
     ECR_REPOSITORY: "lirw-ecr-database-seed-repo-$ENV_VAR"
     TASK_FAMILY: "db-seeder-$ENV_VAR"
   before_script:
-    - !reference [.scripts, cli]
+    - !reference [.setup_cli, script]
     - !reference [.aws_oidc_login, script]
   script:
-    - !reference [.scripts, resolve_image]
-    - !reference [.scripts, update_task_def]
+    - !reference [.resolve_image, script]
+    - !reference [.update_task_def, script]
 
     - SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=ecs-node-backend-sg-$ENV_VAR" --query "SecurityGroups[0].GroupId" --output text)
     - SUBNETS=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=pri-sub-*" --query 'Subnets[*].SubnetId' --output json | tr -d '\n' | tr -d ' ')
