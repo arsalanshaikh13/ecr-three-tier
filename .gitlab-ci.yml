@@ -105,6 +105,16 @@ detect-changes:
       # GitLab will automatically merge the dotenv files from all 3 matrix jobs
       dotenv: build-${SERVICE}.env
 # ---------------------------------------------------------
+# HIDDEN HELPER: Setup Build Environment
+# ---------------------------------------------------------
+.setup_build_env:
+  script:
+    - apk add --no-cache aws-cli
+    # 1. Dynamically evaluate the variable name stored in $VAR_NAME (e.g., $BUILD_FRONTEND)
+    - eval export SHOULD_BUILD=\$${VAR_NAME}
+    # 2. If the variable is empty (meaning no changes were detected), default it to "false"
+    - export SHOULD_BUILD=${SHOULD_BUILD:-false}
+# ---------------------------------------------------------
 # STAGE 1: BUILD & PUSH
 # ---------------------------------------------------------
 build_image:
@@ -118,14 +128,9 @@ build_image:
   services:
     - docker:24.0.5-dind
   before_script:
-    - apk add --no-cache aws-cli
+    # By making this purely references, we satisfy the strict array validator
+    - !reference [.setup_build_env, script]
     - !reference [.aws_oidc_login, script]
-
-    # 1. Dynamically evaluate the variable name stored in $VAR_NAME (e.g., $BUILD_FRONTEND)
-    - eval export SHOULD_BUILD=\$${VAR_NAME}
-
-    # 2. If the variable is empty (meaning no changes were detected), default it to "false"
-    - export SHOULD_BUILD=${SHOULD_BUILD:-false}
 
   script:
     - ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
