@@ -134,7 +134,7 @@ build_image:
     - !reference [.aws_oidc_login, script]
 
     # 1. Dynamically evaluate the variable name stored in $VAR_NAME (e.g., $BUILD_FRONTEND)
-    - eval export SHOULD_BUILD=\$${VAR_NAME}
+    - eval "export SHOULD_BUILD=\$${VAR_NAME}"
 
     # 2. If the variable is empty (meaning no changes were detected), default it to "false"
     - export SHOULD_BUILD=${SHOULD_BUILD:-false}
