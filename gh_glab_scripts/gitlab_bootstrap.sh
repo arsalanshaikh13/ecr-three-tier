@@ -1,15 +1,26 @@
 #!/bin/bash
+
+# # Ensure config directory exists
+# mkdir -p ~/.config/glab-cli
+
+# # Set default protocols and disable the telemetry that caused your 401 error
+# glab config set api_protocol https --global
+# glab config set git_protocol ssh --global
+# glab config set check_update false --global
+
+# Disable the usage reporting to stop the 401 Unauthorized noise
+# export GLAB_REPORT_USAGE=false
+
 source ./gh_glab_scripts/.env_gitlab
 echo "gitlab token : $GITLAB_TOKEN "
-glab config set check_update false
-glab config set display_status false
 # To explicitly disable the usage tracking causing the error:
 export GLAB_REPORT_USAGE=false
 
 # 1. Authenticate using the PAT (uses 'api' and 'read_user' scopes)
 glab auth login --token "$GITLAB_TOKEN" --hostname gitlab.com
 # Set SSH as the default protocol
-glab config set git_protocol 
+# glab config set git_protocol  ssh --global
+# glab config set api_protocol https --global
 
 glab auth status
 # Add local SSH key to GitLab profile
@@ -39,7 +50,7 @@ glab variable set ENV_VAR --value "dev"  --repo arsalanshaikh13/ecr-three-tier
 
 
 # 4. Push code to trigger the pipeline (uses 'write_repository' scope)
-git remote add gitlab $(glab repo view --json ssh_url_to_repo -q '.ssh_url_to_repo')
+git remote add gitlab $(glab repo view arsalanshaikh13/ecr-three-tier -F json | jq -r '.ssh_url_to_repo')
 git add .
 git commit -m "Initial gitlab CI/CD setup for ecr-three-tier for host network"
 git push -u gitlab gitlab-public

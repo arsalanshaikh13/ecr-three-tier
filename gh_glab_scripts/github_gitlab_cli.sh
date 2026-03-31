@@ -176,6 +176,8 @@ git add .
 git commit -m "Initial commit from bootstrapper"
 git branch -M main
 git remote add origin "git@gitlab.com:$GH_USER/$REPO_NAME.git"
+git remote add gitlab $(glab repo view owner/repo -F json | jq -r '.ssh_url_to_repo')
+
 
 echo "✅ Ready to push! Just run 'git push -u origin main'"
 
