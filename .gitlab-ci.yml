@@ -88,6 +88,7 @@ default:
     - TASK_DEF_JSON=$(aws ecs describe-task-definition --task-definition $TASK_FAMILY --query taskDefinition)
     - NEW_DEF=$(echo "$TASK_DEF_JSON" | jq --arg IMAGE "$FINAL_IMAGE" '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities)')
     - NEW_TASK_ARN=$(aws ecs register-task-definition --cli-input-json "$NEW_DEF" --query 'taskDefinition.taskDefinitionArn' --output text)
+
 # ---------------------------------------------------------
 # 1. DETECT CHANGES
 # ---------------------------------------------------------
@@ -110,10 +111,6 @@ detect-changes:
   artifacts:
     reports:
       dotenv: build.env
-  # only:
-  #   - main
-  #   - fargate
-  #   - gitlab-public
 
 # ---------------------------------------------------------
 # 2. BUILD & DEPLOY JOBS
@@ -126,16 +123,16 @@ detect-changes:
   before_script:
     - !reference [.setup_cli, script]
     - !reference [.aws_oidc_login, script]
-  script:
     - !reference [.resolve_image, script]
     - !reference [.update_task_def, script]
+  script:
     - aws ecs update-service --cluster $ECS_CLUSTER --service $SERVICE_NAME --task-definition $NEW_TASK_ARN --force-new-deployment
     - aws ecs wait services-stable --cluster $ECS_CLUSTER --services $SERVICE_NAME
 
 deploy-frontend:
-  extends: .deploy_template # Fixed: Changed from <<: *deploy_base
+  extends: .deploy_template
   needs:
-    - job: detect-changes # Fixed: hyphen, not underscore
+    - job: detect-changes
       artifacts: true
   variables:
     SHOULD_BUILD: $BUILD_FRONTEND
@@ -145,17 +142,12 @@ deploy-frontend:
     TASK_FAMILY: "lirw-ecr-frontend"
     SERVICE_NAME: "frontend-service"
   rules:
-    # Run if pushed code modified frontend, OR if user checked "Build" or "Get" in the UI
     - if: '$BUILD_FRONTEND == "true" || $GET_FRONTEND == "true"'
-  # only:
-  #   - main
-  #   - fargate
-  #   - gitlab-public
 
 deploy-backend:
-  extends: .deploy_template # Fixed: Changed from <<: *deploy_base
+  extends: .deploy_template
   needs:
-    - job: detect-changes # Fixed: hyphen, not underscore
+    - job: detect-changes
       artifacts: true
   variables:
     SHOULD_BUILD: $BUILD_BACKEND
@@ -165,12 +157,7 @@ deploy-backend:
     TASK_FAMILY: "lirw-ecr-backend"
     SERVICE_NAME: "backend-service"
   rules:
-    # Run if pushed code modified backend, OR if user checked "Build" or "Get" in the UI
     - if: '$BUILD_BACKEND == "true" || $GET_BACKEND == "true"'
-  # only:
-  #   - main
-  #   - fargate
-  #   - gitlab-public
 
 # ---------------------------------------------------------
 # 3. DB SEEDING
@@ -184,7 +171,6 @@ seed-database:
     - job: detect-changes
       artifacts: true
   rules:
-    # Run automatically if code push modified the seeder folder, OR if manually checked in the UI
     - if: '$SEED_DATABASE == "true"'
   variables:
     SHOULD_BUILD: "true"
@@ -195,17 +181,14 @@ seed-database:
   before_script:
     - !reference [.setup_cli, script]
     - !reference [.aws_oidc_login, script]
-  script:
     - !reference [.resolve_image, script]
     - !reference [.update_task_def, script]
-
+  script:
     - SG_ID=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=ecs-node-backend-sg-$ENV_VAR" --query "SecurityGroups[0].GroupId" --output text)
     - SUBNETS=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=pri-sub-*" --query 'Subnets[*].SubnetId' --output json | tr -d '\n' | tr -d ' ')
-
     - echo "Starting DB Seeding Task..."
     - TASK_ARN=$(aws ecs run-task --cluster $ECS_CLUSTER --task-definition $NEW_TASK_ARN --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=$SUBNETS,securityGroups=[$SG_ID]}" --query "tasks[0].taskArn" --output text)
     - aws ecs wait tasks-stopped --cluster $ECS_CLUSTER --tasks $TASK_ARN
-
     - EXIT_CODE=$(aws ecs describe-tasks --cluster $ECS_CLUSTER --tasks $TASK_ARN --query "tasks[0].containers[0].exitCode" --output text)
     - |
       if [ "$EXIT_CODE" -eq "0" ]; then echo "✅ Seeding Success"; else echo "❌ Seeding Failed" && exit 1; fi
