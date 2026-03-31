@@ -658,7 +658,8 @@ output "rds_endpoint" {
 
 resource "aws_ecs_task_definition" "db_seeder" {
   family                   = "db-seeder-${local.env_suffix}"
-  requires_compatibilities = ["EC2"]
+  # requires_compatibilities = ["EC2"]
+  requires_compatibilities = ["FARGATE"]
   # network_mode             = "host" # Required for security group assignment
   # network_mode             = "bridge" # Required for security group assignment
   network_mode             = "awsvpc" # Required for security group assignment
@@ -723,76 +724,7 @@ resource "aws_ecs_task_definition" "db_seeder" {
 #---------------------------------------------
 # 6. EC2 Auto Scaling Group & Launch Template
 #---------------------------------------------
-# Dynamically fetch the latest Amazon Linux 2023 ECS-Optimized AMI
-data "aws_ssm_parameter" "ecs_optimized_ami" {
-  name = "/aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id"
-}
 
-locals {
-  ecs_apps = {
-    frontend = {
-      instance_type = "c7i-flex.large"
-      # subnets       = [aws_subnet.pub_sub_1a.id, aws_subnet.pub_sub_2b.id]
-      subnets       = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id]
-      sg_id         = aws_security_group.ecs_node_frontend_sg.id
-    }
-    backend = {
-      instance_type = "c7i-flex.large"
-      subnets       = [aws_subnet.pri_sub_3a.id, aws_subnet.pri_sub_4b.id]
-      # subnets       = [aws_subnet.pub_sub_1a.id, aws_subnet.pub_sub_2b.id]
-      sg_id         = aws_security_group.ecs_node_backend_sg.id
-    }
-  }
-}
-
-resource "aws_launch_template" "ecs_lt" {
-  for_each = local.ecs_apps
-
-  name_prefix   = "ecs-${each.key}-template-"
-  image_id      = data.aws_ssm_parameter.ecs_optimized_ami.value
-  instance_type = each.value.instance_type
-
-  iam_instance_profile {
-    name = aws_iam_instance_profile.ecs_node_profile.name
-  }
-
-  # This now dynamically picks the correct SG
-  vpc_security_group_ids = [each.value.sg_id]
-
-  user_data = base64encode(<<-EOF
-    #!/bin/bash
-    echo ECS_CLUSTER=${aws_ecs_cluster.app_cluster.name} >> /etc/ecs/ecs.config
-  EOF
-  )
-}
-
-resource "aws_autoscaling_group" "ecs_asg" {
-  for_each = local.ecs_apps
-
-  name                = "ecs-asg-${each.key}-${local.env_suffix}"
-  vpc_zone_identifier = each.value.subnets
-  
-  min_size         = 1
-  max_size         = 2
-  desired_capacity = 1
-
-  launch_template {
-    id      = aws_launch_template.ecs_lt[each.key].id
-    version = "$Latest"
-  }
-
-  tag {
-    key                 = "AmazonECSManaged"
-    value               = true
-    propagate_at_launch = true
-  }
-
-  tag {
-    key                 = "Name"
-    value               = "ecs-node-${each.key}"
-    propagate_at_launch = true
-  }
-}
 #---------------------------------------------
 # 7. ECS Cluster & Capacity Provider
 #---------------------------------------------
@@ -813,43 +745,6 @@ resource "aws_ecs_cluster" "app_cluster" {
     }
   }
   tags = local.common_tags
-}
-
-resource "aws_ecs_capacity_provider" "ec2_provider" {
-  for_each = local.ecs_apps
-  name = "ec2-capacity-provider-${each.key}-${local.env_suffix}"
-
-  auto_scaling_group_provider {
-    auto_scaling_group_arn         = aws_autoscaling_group.ecs_asg[each.key].arn
-    managed_termination_protection = "DISABLED"
-
-    managed_scaling {
-      status          = "ENABLED"
-      target_capacity = 100 
-    }
-  }
-}
-
-# i have already defined separately inside ecs service capacity provider strategy so not needed here
-resource "aws_ecs_cluster_capacity_providers" "cluster_attach" {
-  for_each = local.ecs_apps
-
-  cluster_name = aws_ecs_cluster.app_cluster.name
-# Register BOTH providers at once
-  capacity_providers = [
-    aws_ecs_capacity_provider.ec2_provider["frontend"].name,
-    aws_ecs_capacity_provider.ec2_provider["backend"].name
-  ]
-  
-  # capacity_providers = [
-  #   aws_ecs_capacity_provider.ec2_provider[each.key].name,
-  # ]
-
-  # default_capacity_provider_strategy {
-  #   base              = 1
-  #   weight            = 100
-  #   capacity_provider = aws_ecs_capacity_provider.ec2_provider[each.key].name
-  # }
 }
 
 
@@ -925,8 +820,53 @@ resource "aws_route53_record" "subdomain_alias" {
 
 
 #---------------------------------------------
-# 9. ALB + Target Group + Listener
+# 9. EFS file system
 #---------------------------------------------
+# 1. Create the persistent EFS drive
+resource "aws_efs_file_system" "backend_data" {
+  creation_token = "backend-fargate-data"
+  encrypted      = true
+
+  tags = {
+    Name = "backend-Fargate-Storage"
+  }
+}
+
+# 2. Create Mount Targets (Plugging the drive into your Private Subnets)
+# You need one of these for EACH private subnet your MongoDB task might run in.
+resource "aws_efs_mount_target" "backend_mount_target_1" {
+  file_system_id  = aws_efs_file_system.backend_data.id
+  subnet_id       = aws_subnet.pri_sub_3a.id # Change to your actual subnet ID
+  security_groups = [aws_security_group.efs_sg.id] # We will define this next
+}
+
+resource "aws_efs_mount_target" "backend_mount_target_2" {
+  file_system_id  = aws_efs_file_system.backend_data.id
+  subnet_id       = aws_subnet.pri_sub_4b.id # Change to your actual subnet ID
+  security_groups = [aws_security_group.efs_sg.id]
+}
+
+resource "aws_security_group" "efs_sg" {
+  name        = "backend-efs-sg"
+  description = "Allow Fargate tasks to access EFS"
+  vpc_id      = aws_vpc.vpc.id
+
+  ingress {
+    description     = "Allow NFS traffic from MongoDB Fargate tasks"
+    from_port       = 2049
+    to_port         = 2049
+    protocol        = "tcp"
+    # IMPORTANT: This must be the Security Group attached to your MongoDB ECS Service!
+    security_groups = [aws_security_group.ecs_node_backend_sg.id] 
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
 
 #---------------------------------------------
 # 10. ECS Task Definition
@@ -938,25 +878,33 @@ resource "aws_ecs_task_definition" "backend" {
   # network_mode             = "bridge"
   # network_mode             = "host"
   network_mode             = "awsvpc"
-  requires_compatibilities = ["EC2"]
+  # requires_compatibilities = ["EC2"]
+  requires_compatibilities = ["FARGATE"]
   execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
   task_role_arn            = aws_iam_role.ecs_task_role.arn
+  memory    = var.app_memory
+  cpu       = var.app_cpu 
+      
 
-  # Provisions a local Docker volume on the EC2 host's EBS drive
+  # Provisions a EFS volume on the Fargate host's EBS drive
+
+# This replaces the empty bind mount block
   volume {
     name = "backend_data_prod"
-    docker_volume_configuration {
-      scope         = "shared"
-      autoprovision = true
-      driver        = "local"
+    
+    efs_volume_configuration {
+      file_system_id     = aws_efs_file_system.backend_data.id
+      root_directory     = "/"
+      transit_encryption = "ENABLED"
     }
   }
   volume {
     name = "backend_config_prod"
-    docker_volume_configuration {
-      scope         = "shared"
-      autoprovision = true
-      driver        = "local"
+    
+    efs_volume_configuration {
+      file_system_id     = aws_efs_file_system.backend_data.id
+      root_directory     = "/"
+      transit_encryption = "ENABLED"
     }
   }
 
@@ -968,8 +916,8 @@ resource "aws_ecs_task_definition" "backend" {
       essential = true
       
       # Resource limits moved to the container level to prevent host OOM issues
-      memory    = var.app_cpu 
-      cpu       = var.app_memory
+      memory    = var.app_memory
+      cpu       = var.app_cpu 
       
       portMappings = [
         {
@@ -1017,12 +965,12 @@ resource "aws_ecs_task_definition" "backend" {
       }
     }
   ])
-    lifecycle {
-    ignore_changes = [
-      container_definitions,
-      # desired_count
-    ]
-  }
+  #   lifecycle {
+  #   ignore_changes = [
+  #     container_definitions,
+  #     # desired_count
+  #   ]
+  # }
 
 }
 
@@ -1031,9 +979,13 @@ resource "aws_ecs_task_definition" "app" {
   # network_mode             = "bridge"
   network_mode             = "awsvpc"
   # network_mode             = "host"
-  requires_compatibilities = ["EC2"]
+  requires_compatibilities = ["FARGATE"]
+  # requires_compatibilities = ["EC2"]
   execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
   task_role_arn            = aws_iam_role.ecs_task_role.arn
+  memory    = var.app_memory
+  cpu       = var.app_cpu 
+      
 
   container_definitions = jsonencode([
     {
@@ -1079,11 +1031,11 @@ resource "aws_ecs_task_definition" "app" {
       }
     }
   ])
-  lifecycle {
-    ignore_changes = [
-      container_definitions,
-    ]
-  }
+  # lifecycle {
+  #   ignore_changes = [
+  #     # container_definitions,
+  #   ]
+  # }
 
 }
 #---------------------------------------------
@@ -1151,8 +1103,8 @@ resource "aws_ecs_service" "backend" {
   cluster         = aws_ecs_cluster.app_cluster.id # Replace with your cluster ID
   task_definition = aws_ecs_task_definition.backend.arn
   desired_count   = var.desired_count
-  # launch_type     = "EC2"
-  enable_execute_command = true
+  launch_type     = "FARGATE"
+  # enable_execute_command = true
 
   # Attach the service to the NLB Target Group
   load_balancer {
@@ -1166,12 +1118,6 @@ resource "aws_ecs_service" "backend" {
     delete = "5m" 
   }
 
-  capacity_provider_strategy {
-    capacity_provider = aws_ecs_capacity_provider.ec2_provider["backend"].name
-    weight            = 100
-    base              = 1
-
-  }
 
     # this only works for awsvpc network mode not host network mode
   network_configuration {
@@ -1201,10 +1147,7 @@ resource "aws_ecs_service" "backend" {
     # aws_ecs_cluster_capacity_providers.cluster_attach
   ]
 
-  # Ensure the tasks are distributed across your EC2 instances (if running multiple)
-  placement_constraints {
-    type       = "distinctInstance"
-  }
+  
 }
 
 resource "aws_lb" "app_alb" {
@@ -1283,8 +1226,8 @@ resource "aws_ecs_service" "app" {
   cluster         = aws_ecs_cluster.app_cluster.id # Replace with your cluster ID
   task_definition = aws_ecs_task_definition.app.arn
   desired_count   = var.desired_count # Assuming you want high availability
-  # launch_type     = "EC2"
-  enable_execute_command = true
+  launch_type     = "FARGATE"
+  # enable_aexecute_command = true
 
   # Attach the service to the ALB Target Group
   load_balancer {
@@ -1297,12 +1240,6 @@ resource "aws_ecs_service" "app" {
     delete = "5m" 
   }
 
-  capacity_provider_strategy {
-    capacity_provider = aws_ecs_capacity_provider.ec2_provider["frontend"].name
-    weight            = 100
-    base              = 1
-
-  }
 
   # this only works for awsvpc network mode not host network mode
   network_configuration {
@@ -1331,56 +1268,9 @@ resource "aws_ecs_service" "app" {
     # aws_ecs_cluster_capacity_providers.cluster_attach
   ]
 
-  # Optional: Spread tasks evenly across Availability Zones
-  ordered_placement_strategy {
-    type  = "spread"
-    field = "attribute:ecs.availability-zone"
-  }
+  
 }
 #---------------------------------------------
 # 12. Application Auto Scaling (Task Level)
 #---------------------------------------------
 
-
-# Auto-scale tasks based on CPU Utilization
-
-resource "aws_appautoscaling_target" "ecs_target" {
-  for_each = {
-    frontend = {
-      min  = 2
-      max  = 10
-      name = aws_ecs_service.app.name      # Links to your frontend service
-    }
-    backend = {
-      min  = 2
-      max  = 10
-      name = aws_ecs_service.backend.name  # Links to your backend service
-    }
-  }
-
-  max_capacity       = each.value.max
-  min_capacity       = each.value.min
-  resource_id        = "service/${aws_ecs_cluster.app_cluster.name}/${each.value.name}"
-  scalable_dimension = "ecs:service:DesiredCount"
-  service_namespace  = "ecs"
-}
-
-
-resource "aws_appautoscaling_policy" "ecs_policy_cpu" {
-  for_each = aws_appautoscaling_target.ecs_target # Automatically loops through both
-
-  name               = "${each.key}-cpu-autoscaling-${local.env_suffix}"
-  policy_type        = "TargetTrackingScaling"
-  resource_id        = each.value.resource_id
-  scalable_dimension = each.value.scalable_dimension
-  service_namespace  = each.value.service_namespace
-
-  target_tracking_scaling_policy_configuration {
-    predefined_metric_specification {
-      predefined_metric_type = "ECSServiceAverageCPUUtilization"
-    }
-    target_value       = 75.0
-    scale_in_cooldown  = 300
-    scale_out_cooldown = 60
-  }
-}

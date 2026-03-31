@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - fargate
     paths:
       - "lirw-three-tier/frontend/**"
       - "lirw-three-tier/backend/**"
@@ -302,7 +303,7 @@ jobs:
           TASK_ARN=$(aws ecs run-task \
             --cluster ${{ env.ECS_CLUSTER }} \
             --task-definition ${{ steps.register-task-def.outputs.task_def_arn }} \
-            --launch-type EC2 \
+            --launch-type FARGATE \
             --network-configuration '{
               "awsvpcConfiguration": {
                 "subnets": ${{ steps.lookup.outputs.subnets }},
