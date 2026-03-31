@@ -63,17 +63,20 @@ default:
         TASK_FAMILY: "lirw-ecr-frontend"
         ECS_SERVICE_NAME: "frontend-service"
         VAR_NAME: "$BUILD_FRONTEND"
+        DOCKERFILE: Dockerfile
       - SERVICE: "backend"
         BUILD_DIR: "lirw-three-tier/backend"
         ECR_REPOSITORY: "lirw-ecr-backend-repo-$ENV_VAR"
         TASK_FAMILY: "lirw-ecr-backend"
         ECS_SERVICE_NAME: "backend-service"
         VAR_NAME: "$BUILD_BACKEND"
+        DOCKERFILE: Dockerfile
       - SERVICE: "seed-database"
         BUILD_DIR: "lirw-three-tier/database-seeder"
         ECR_REPOSITORY: "lirw-ecr-database-seed-repo-$ENV_VAR"
         TASK_FAMILY: "db-seeder-$ENV_VAR"
         VAR_NAME: "$SEED_DATABASE"
+        DOCKERFILE: db.Dockerfile
 
 # ---------------------------------------------------------
 # STAGE DETECT CHANGES
@@ -149,7 +152,9 @@ build_image:
         
         IMAGE_TAG="${CI_COMMIT_SHA}"
         cd $BUILD_DIR
-        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile .
+        echo "🏗️ Building Docker Image using $DOCKERFILE..."
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f $DOCKERFILE .
+
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
         
         FINAL_IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
