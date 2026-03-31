@@ -438,13 +438,13 @@ resource "aws_security_group" "ecs_node_frontend_sg" {
   }
 
 # 1. Existing Rule: Allow Public ALB to hit Ephemeral Ports
-  # ingress {
-  #   description     = "node port access from ALB"
-  #   from_port       = 32768
-  #   to_port         = 65535
-  #   protocol        = "tcp"
-  #   security_groups = [aws_security_group.alb_sg.id]
-  # }
+  ingress {
+    description     = "node port access from ALB"
+    from_port       = 32768
+    to_port         = 65535
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb_sg.id]
+  }
   # ingress {
   #   description     = "node port access from ALB"
   #   from_port       = 3000
@@ -506,7 +506,13 @@ resource "aws_security_group" "ecs_node_backend_sg" {
     security_groups = [aws_security_group.internal_alb_sg.id]
   }
 
-
+  ingress {
+    description     = "node port access from ALB"
+    from_port       = 32768
+    to_port         = 65535
+    protocol        = "tcp"
+    security_groups = [aws_security_group.internal_alb_sg.id]
+  }
   # # 3. NEW: The Hairpin Fix (Self-Referencing)
   # # Allows containers on the same EC2 node to talk to each other
   # ingress {
@@ -539,14 +545,25 @@ resource "aws_security_group" "ecs_node_rds_sg" {
   description = "SG for ECS EC2 nodes rds"
   vpc_id      = aws_vpc.vpc.id
   
-    # 2. NEW: Allow the Internal NLB to route traffic to the Mongo Container
-
+    # since i am using aws cli command to create task instead of service
+    # aws will randomly assign within the ec2 instances attached to cluster
+    # those ec2 instance can be from frontend or backend since i am using host network
+    # the task container inherits the security group of the ec2 instance it lands on or runs on during seeding operation
   ingress {
     description = "node port access"
     from_port   = 3306
     to_port     = 3306
     protocol    = "tcp"
     security_groups = [aws_security_group.ecs_node_backend_sg.id]
+  }
+  # Add this block to allow Frontend nodes to reach RDS (so the seeder works anywhere)
+  ingress {
+    description     = "Allow Frontend nodes to reach RDS for DB Seeding"
+    from_port       = 3306
+    to_port         = 3306
+    protocol        = "tcp"
+    # Replace this with your actual frontend node SG reference:
+    security_groups = [aws_security_group.ecs_node_frontend_sg.id] 
   }
 
   egress {
@@ -642,7 +659,8 @@ output "rds_endpoint" {
 resource "aws_ecs_task_definition" "db_seeder" {
   family                   = "db-seeder-${local.env_suffix}"
   requires_compatibilities = ["EC2"]
-  network_mode             = "host" # Required for security group assignment
+  # network_mode             = "host" # Required for security group assignment
+  network_mode             = "bridge" # Required for security group assignment
   cpu                      = var.db_cpu
   memory                   = var.db_memory
   execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
@@ -915,8 +933,8 @@ resource "aws_route53_record" "subdomain_alias" {
 
 resource "aws_ecs_task_definition" "backend" {
   family                   = "lirw-ecr-backend"
-  # network_mode             = "bridge"
-  network_mode             = "host"
+  network_mode             = "bridge"
+  # network_mode             = "host"
   requires_compatibilities = ["EC2"]
   execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
   task_role_arn            = aws_iam_role.ecs_task_role.arn
@@ -1007,8 +1025,8 @@ resource "aws_ecs_task_definition" "backend" {
 
 resource "aws_ecs_task_definition" "app" {
   family                   = "lirw-ecr-frontend"
-  # network_mode             = "bridge"
-  network_mode             = "host"
+  network_mode             = "bridge"
+  # network_mode             = "host"
   requires_compatibilities = ["EC2"]
   execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
   task_role_arn            = aws_iam_role.ecs_task_role.arn
