@@ -132,13 +132,13 @@ build_image:
     - !reference [.aws_oidc_login, script]
 
     - |
-      # Dynamically evaluate variable name stored in VAR_NAME
-      eval "SHOULD_BUILD=\${$VAR_NAME}"
-
-      # Default fallback
+      SHOULD_BUILD=$(printenv "$VAR_NAME")
       SHOULD_BUILD=${SHOULD_BUILD:-false}
-
       export SHOULD_BUILD
+
+      echo "SERVICE: $SERVICE"
+      echo "VAR_NAME: $VAR_NAME"
+      echo "SHOULD_BUILD: $SHOULD_BUILD"
   script:
     - ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
