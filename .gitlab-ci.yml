@@ -62,20 +62,20 @@ default:
         ECR_REPOSITORY: "lirw-ecr-frontend-repo-$ENV_VAR"
         TASK_FAMILY: "lirw-ecr-frontend"
         ECS_SERVICE_NAME: "frontend-service"
-        VAR_NAME: "$BUILD_FRONTEND"
+        VAR_NAME: "BUILD_FRONTEND"
         DOCKERFILE: Dockerfile
       - SERVICE: "backend"
         BUILD_DIR: "lirw-three-tier/backend"
         ECR_REPOSITORY: "lirw-ecr-backend-repo-$ENV_VAR"
         TASK_FAMILY: "lirw-ecr-backend"
         ECS_SERVICE_NAME: "backend-service"
-        VAR_NAME: "$BUILD_BACKEND"
+        VAR_NAME: "BUILD_BACKEND"
         DOCKERFILE: Dockerfile
       - SERVICE: "seed-database"
         BUILD_DIR: "lirw-three-tier/database-seeder"
         ECR_REPOSITORY: "lirw-ecr-database-seed-repo-$ENV_VAR"
         TASK_FAMILY: "db-seeder-$ENV_VAR"
-        VAR_NAME: "$SEED_DATABASE"
+        VAR_NAME: "SEED_DATABASE"
         DOCKERFILE: db.Dockerfile
 
 # ---------------------------------------------------------
@@ -248,7 +248,7 @@ seed-database:
   rules:
     # 1. Target ONLY the database-seeder matrix instance
     # 2. ONLY run if the $SEED_DATABASE variable evaluated to "true"
-    - if: '$SERVICE == "database-seeder" && $SEED_DATABASE == "true"'
+    - if: '$SERVICE == "seed-database" && $SEED_DATABASE == "true"'
   before_script:
     - apk add --no-cache aws-cli
     - !reference [.aws_oidc_login, script]
