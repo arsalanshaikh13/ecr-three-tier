@@ -116,8 +116,7 @@ jobs:
             if [ "$COMPONENT" == "database-seeder" ]; then DOCKERFILE="db.Dockerfile"; fi
 
             if [ "$SHOULD_BUILD" == "true" ]; then
-              docker build -f $DOCKERFILE -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
-              docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+              docker build -f "$DOCKERFILE" -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" -t "$ECR_REGISTRY/$ECR_REPOSITORY:latest" .              docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
               FINAL_IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
             else
               FETCHED_TAG=$(aws ecr describe-images --repository-name $ECR_REPOSITORY --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags[0]' --output text)
