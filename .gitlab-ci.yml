@@ -136,9 +136,6 @@ build_image:
   services:
     - docker:24.0.5-dind
   before_script:
-    - apk add --no-cache aws-cli
-    - !reference [.aws_oidc_login, script]
-
     # 1. Dynamically evaluate the variable name stored in $BUILD_NAME (e.g., $BUILD_FRONTEND)
     - eval "export SHOULD_BUILD=\$${BUILD_NAME}"
     # 1. Dynamically evaluate the variable name stored in $GET_NAME (e.g., $GET_FRONTEND)
@@ -147,6 +144,16 @@ build_image:
     # 2. If the variable is empty (meaning no changes were detected), default it to "false"
     - export SHOULD_BUILD=${SHOULD_BUILD:-false}
     - export SHOULD_GET=${SHOULD_GET:-false}
+
+    # 1. The Circuit Breaker: stop when both the variables are false
+    - |
+      if [ "$SHOULD_BUILD" == "false" ] && [ "$SHOULD_GET" == "false" ]; then
+        echo "⏭️ No changes detected and it is not manual operation , so no build is required"
+        exit 0 # This tells GitLab the job succeeded, stopping the script gracefully!
+      fi
+
+    - apk add --no-cache aws-cli
+    - !reference [.aws_oidc_login, script]
 
   script:
     - ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
@@ -165,8 +172,8 @@ build_image:
         FINAL_IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 
       # FIXED: Added Bash test brackets [ ] and the 'then' keyword
-      elif [ "$CI_PIPELINE_SOURCE" == "web" && "$SHOULD_GET" == "true" ]; then
-        echo "🔍 No changes detected. Fetching latest tag from ECR for $SERVICE..."
+      elif [ "$CI_PIPELINE_SOURCE" == "web" ] && [ "$SHOULD_GET" == "true" ]; then
+        echo " It is manual pipeline. Fetching latest tag from ECR for $SERVICE..."
         FETCHED_TAG=$(aws ecr describe-images --repository-name $ECR_REPOSITORY --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags[0]' --output text)
         
         if [ "$FETCHED_TAG" == "None" ] || [ -z "$FETCHED_TAG" ]; then 
@@ -196,6 +203,12 @@ prepare_manifest:
     - job: build_image
       artifacts: true
   before_script:
+    # 1. The Circuit Breaker: check if file exist and has size greater than 0
+    - |
+      if [ ! -s "${SERVICE}-image.txt" ]; then
+        echo "⏭️ No new image was built in the previous step. Skipping manifest preparation."
+        exit 0 # This tells GitLab the job succeeded, stopping the script gracefully!
+      fi
     - apk add --no-cache aws-cli jq
     - !reference [.aws_oidc_login, script]
   script:
@@ -232,6 +245,12 @@ deploy_ecs:
     - job: prepare_manifest
       artifacts: true
   before_script:
+    # 1. The Circuit Breaker: check if file exist and has size greater than 0
+    - |
+      if [ ! -s "${SERVICE}-ready-task-def.json" ]; then
+        echo "⏭️ No task definition job was found in the previous step. Skipping deploy."
+        exit 0 # This tells GitLab the job succeeded, stopping the script gracefully!
+      fi
     - apk add --no-cache aws-cli
     - !reference [.aws_oidc_login, script]
   script:
@@ -265,14 +284,14 @@ seed-database:
     #   # 3. Otherwise, do not run this job
     # - when: never
   before_script:
-    - apk add --no-cache aws-cli
-    - !reference [.aws_oidc_login, script]
-  script:
     - |
       if [ "$SEED_DATABASE" != "true" ] && [ "$GET_SEED_IMAGE" != "true" ]; then
         echo "⏭️ No changes detected and no manual seed requested. Exiting gracefully."
         exit 0
       fi
+    - apk add --no-cache aws-cli
+    - !reference [.aws_oidc_login, script]
+  script:
     - echo "Registering new ECS task definition for $SERVICE..."
     - |
       NEW_TASK_ARN=$(aws ecs register-task-definition \
