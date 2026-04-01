@@ -149,7 +149,7 @@ build_image:
     - |
       if [ "$SHOULD_BUILD" == "false" ] && [ "$SHOULD_GET" == "false" ]; then
         echo "⏭️ No changes detected and it is not manual operation , so no build is required"
-        exit 0 # This tells GitLab the job succeeded, stopping the script gracefully!
+        exit 1 # This tells GitLab the job succeeded, stopping the script gracefully!
       fi
 
     - apk add --no-cache aws-cli
@@ -184,7 +184,7 @@ build_image:
 
       else
         echo "⏭️ No changes detected, so no build is required."
-        exit 0
+        exit 1
       fi
 
     - echo "✅ Resolved Image $FINAL_IMAGE"
@@ -207,7 +207,7 @@ prepare_manifest:
     - |
       if [ ! -s "${SERVICE}-image.txt" ]; then
         echo "⏭️ No new image was built in the previous step. Skipping manifest preparation."
-        exit 0 # This tells GitLab the job succeeded, stopping the script gracefully!
+        exit 1 # This tells GitLab the job succeeded, stopping the script gracefully!
       fi
     - apk add --no-cache aws-cli jq
     - !reference [.aws_oidc_login, script]
@@ -249,7 +249,7 @@ deploy_ecs:
     - |
       if [ ! -s "${SERVICE}-ready-task-def.json" ]; then
         echo "⏭️ No task definition job was found in the previous step. Skipping deploy."
-        exit 0 # This tells GitLab the job succeeded, stopping the script gracefully!
+        exit 1 # This tells GitLab the job succeeded, stopping the script gracefully!
       fi
     - apk add --no-cache aws-cli
     - !reference [.aws_oidc_login, script]
@@ -287,7 +287,7 @@ seed-database:
     - |
       if [ "$SEED_DATABASE" != "true" ] && [ "$GET_SEED_IMAGE" != "true" ]; then
         echo "⏭️ No changes detected and no manual seed requested. Exiting gracefully."
-        exit 0
+        exit 1
       fi
     - apk add --no-cache aws-cli
     - !reference [.aws_oidc_login, script]
