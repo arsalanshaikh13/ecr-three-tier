@@ -94,7 +94,7 @@ jobs:
           docker_layer_caching: true
 
       - aws-cli/setup:
-          role_arn: "arn:aws:iam::$ACCOUNT_ID:role/CircleCIActions-ECS-DeployRole"
+          role_arn: "arn:aws:iam::750702272407:role/CircleCIActions-ECS-DeployRole"
           region: $AWS_REGION
           profile_name: default
 
