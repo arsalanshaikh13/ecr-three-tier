@@ -91,7 +91,6 @@ jobs:
             echo "export SHOULD_GET=$SHOULD_GET" >> $BASH_ENV
 
       - setup_remote_docker:
-          version: 23.0.1
           docker_layer_caching: true
 
       - aws-cli/setup:
@@ -180,7 +179,7 @@ workflows:
       # This is where the magic happens! One job block loops 3 times.
       - build-and-deploy:
           name: deploy-<< matrix.component >>
-          context: aws-deploy-context
+          context: aws-ecr-context
           filters:
             branches:
               only:
