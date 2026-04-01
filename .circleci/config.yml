@@ -1,0 +1,190 @@
+version: 2.1
+
+# ---------------------------------------------------------
+# 1. PIPELINE PARAMETERS
+# ---------------------------------------------------------
+parameters:
+  manual_trigger:
+    type: boolean
+    default: false
+  build_frontend:
+    type: boolean
+    default: true
+  get_frontend:
+    type: boolean
+    default: false
+  build_backend:
+    type: boolean
+    default: true
+  get_backend:
+    type: boolean
+    default: false
+  run_seeding:
+    type: boolean
+    default: false
+
+orbs:
+  aws-cli: circleci/aws-cli@4.1.2
+
+executors:
+  aws-docker:
+    docker:
+      - image: cimg/aws:2024.03
+
+# ---------------------------------------------------------
+# 2. THE UNIFIED MATRIX JOB
+# ---------------------------------------------------------
+jobs:
+  build-and-deploy:
+    executor: aws-docker
+    environment:
+      AWS_REGION: us-east-1
+    parameters:
+      component:
+        type: string
+    steps:
+      - checkout
+
+      # 1. The Dynamic Circuit Breaker
+      - run:
+          name: "Circuit Breaker: Evaluate Triggers for << parameters.component >>"
+          command: |
+            COMPONENT="<< parameters.component >>"
+            MANUAL="<< pipeline.parameters.manual_trigger >>"
+
+            SHOULD_BUILD="false"
+            SHOULD_GET="false"
+
+            # Route the correct boolean parameters based on the matrix component
+            if [ "$MANUAL" == "true" ]; then
+              case "$COMPONENT" in
+                frontend)
+                  SHOULD_BUILD="<< pipeline.parameters.build_frontend >>"
+                  SHOULD_GET="<< pipeline.parameters.get_frontend >>"
+                  ;;
+                backend)
+                  SHOULD_BUILD="<< pipeline.parameters.build_backend >>"
+                  SHOULD_GET="<< pipeline.parameters.get_backend >>"
+                  ;;
+                seed-database)
+                  SHOULD_BUILD="<< pipeline.parameters.run_seeding >>"
+                  ;;
+              esac
+            else
+              # PUSH EVENT: Check Git Diff
+              BASE_REV=${CIRCLE_PR_BASE_SHA:-<< pipeline.git.base_revision >>}
+              if [ -z "$BASE_REV" ]; then BASE_REV="HEAD~1"; fi
+              
+              if git diff --name-only $BASE_REV << pipeline.git.revision >> | grep -q "lirw-three-tier/$COMPONENT/"; then
+                SHOULD_BUILD="true"
+              fi
+            fi
+
+            # Halt gracefully if no work is needed
+            if [ "$SHOULD_BUILD" == "false" ] && [ "$SHOULD_GET" == "false" ]; then
+              echo "⏭️ No changes or manual triggers for $COMPONENT. Skipping."
+              circleci-agent step halt
+            fi
+
+            # Export for downstream steps
+            echo "export SHOULD_BUILD=$SHOULD_BUILD" >> $BASH_ENV
+            echo "export SHOULD_GET=$SHOULD_GET" >> $BASH_ENV
+
+      - setup_remote_docker:
+          version: 23.0.1
+          docker_layer_caching: true
+
+      - aws-cli/setup:
+          role_arn: "arn:aws:iam::${ACCOUNT_ID}:role/CircleCI-ECS-DeployRole"
+
+      # 2. The Unified Build & Push (Identical for all 3)
+      - run:
+          name: "Build / Fetch Image"
+          command: |
+            COMPONENT="<< parameters.component >>"
+            cd lirw-three-tier/$COMPONENT
+
+            aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+
+            ECR_REGISTRY="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+            ECR_REPOSITORY="lirw-ecr-${COMPONENT}-repo-$ENV_VAR"
+            IMAGE_TAG="<< pipeline.git.revision >>"
+
+            # Note: Handle the seeder's specific Dockerfile name
+            DOCKERFILE="Dockerfile"
+            if [ "$COMPONENT" == "seed-database" ]; then DOCKERFILE="db.Dockerfile"; fi
+
+            if [ "$SHOULD_BUILD" == "true" ]; then
+              docker build -f $DOCKERFILE -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+              docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+              FINAL_IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+            else
+              FETCHED_TAG=$(aws ecr describe-images --repository-name $ECR_REPOSITORY --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags[0]' --output text)
+              FINAL_IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$FETCHED_TAG"
+            fi
+
+            echo "export FINAL_IMAGE=$FINAL_IMAGE" >> $BASH_ENV
+
+      # 3. Task Definition Rendering (Identical logic, dynamic names)
+      - run:
+          name: "Render Task Definition"
+          command: |
+            COMPONENT="<< parameters.component >>"
+
+            if [ "$COMPONENT" == "seed-database" ]; then
+              TASK_FAMILY="db-seeder-$ENV_VAR"
+            else
+              TASK_FAMILY="lirw-ecr-${COMPONENT}"
+            fi
+
+            aws ecs describe-task-definition --task-definition $TASK_FAMILY --query taskDefinition > task-def.json
+            NEW_DEF=$(cat task-def.json | jq --arg IMAGE "$FINAL_IMAGE" '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
+
+            NEW_TASK_ARN=$(aws ecs register-task-definition --cli-input-json "$NEW_DEF" --query 'taskDefinition.taskDefinitionArn' --output text)
+            echo "export NEW_TASK_ARN=$NEW_TASK_ARN" >> $BASH_ENV
+
+      # 4. The Conditional Deployment Split
+      - run:
+          name: "Execute Deployment"
+          command: |
+            COMPONENT="<< parameters.component >>"
+            ECS_CLUSTER="ecs-cluster-$ENV_VAR"
+
+            if [ "$COMPONENT" == "seed-database" ]; then
+              echo "🚀 Running Database Seeder Task..."
+              TASK_ARN=$(aws ecs run-task --cluster $ECS_CLUSTER --task-definition $NEW_TASK_ARN --launch-type EC2 --query "tasks[0].taskArn" --output text)
+              
+              echo "Waiting for task $TASK_ARN to finish..."
+              aws ecs wait tasks-stopped --cluster $ECS_CLUSTER --tasks $TASK_ARN
+              
+              EXIT_CODE=$(aws ecs describe-tasks --cluster $ECS_CLUSTER --tasks $TASK_ARN --query "tasks[0].containers[0].exitCode" --output text)
+              if [ "$EXIT_CODE" != "0" ]; then 
+                echo "❌ Seeding FAILED with exit code $EXIT_CODE"
+                exit 1
+              fi
+              echo "✅ Database seeding successful!"
+              
+            else
+              echo "🚀 Updating Web Service: ${COMPONENT}-service..."
+              aws ecs update-service --cluster $ECS_CLUSTER --service ${COMPONENT}-service --task-definition $NEW_TASK_ARN --force-new-deployment
+              aws ecs wait services-stable --cluster $ECS_CLUSTER --services ${COMPONENT}-service
+              echo "✅ Service update successful!"
+            fi
+
+# ---------------------------------------------------------
+# 3. WORKFLOW ROUTING
+# ---------------------------------------------------------
+workflows:
+  build-push-deploy:
+    jobs:
+      # This is where the magic happens! One job block loops 3 times.
+      - build-and-deploy:
+          name: deploy-<< matrix.component >>
+          context: aws-deploy-context
+          filters:
+            branches:
+              only:
+                - circleci-public
+          matrix:
+            parameters:
+              component: ["frontend", "backend", "seed-database"]
