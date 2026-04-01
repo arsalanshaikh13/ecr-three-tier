@@ -27,23 +27,23 @@ resource "aws_ecr_repository" "app_repos" {
     Name = "ecr-lirwEcr-${each.key}-repo-${local.env_suffix}" 
   })
 }
-resource "aws_ecr_repository" "db_repo" {
-  name                 = "lirw-ecr-database-seed-repo-${local.env_suffix}"
-  image_tag_mutability = "IMMUTABLE"
-  force_delete         = true
+# resource "aws_ecr_repository" "db_repo" {
+#   name                 = "lirw-ecr-database-seed-repo-${local.env_suffix}"
+#   image_tag_mutability = "IMMUTABLE"
+#   force_delete         = true
 
-  image_scanning_configuration {
-    scan_on_push = true
-  }
+#   image_scanning_configuration {
+#     scan_on_push = true
+#   }
   
-  encryption_configuration {
-    encryption_type = "AES256"
-  }
+#   encryption_configuration {
+#     encryption_type = "AES256"
+#   }
 
-  tags = merge(local.common_tags, { 
-    Name = "ecr-lirwEcr--db-repo-${local.env_suffix}" 
-  })
-}
+#   tags = merge(local.common_tags, { 
+#     Name = "ecr-lirwEcr--db-repo-${local.env_suffix}" 
+#   })
+# }
 
 resource "aws_ecr_lifecycle_policy" "app_repo_lifecycle" {
     for_each = local.ecr_names
@@ -548,6 +548,13 @@ resource "aws_security_group" "ecs_node_rds_sg" {
     protocol    = "tcp"
     security_groups = [aws_security_group.ecs_node_backend_sg.id]
   }
+  ingress {
+    description = "node port access"
+    from_port   = 3306
+    to_port     = 3306
+    protocol    = "tcp"
+    security_groups = [aws_security_group.ecs_node_frontend_sg.id]
+  }
 
   egress {
     from_port   = 0
@@ -771,6 +778,9 @@ resource "aws_autoscaling_group" "ecs_asg" {
     key                 = "Name"
     value               = "ecs-node-${each.key}"
     propagate_at_launch = true
+  }
+  lifecycle {
+    ignore_changes = [ desired_capacity ]
   }
 }
 #---------------------------------------------
@@ -1157,12 +1167,12 @@ resource "aws_ecs_service" "backend" {
   deployment_minimum_healthy_percent = 100 
   deployment_maximum_percent         = 200
 
-  # lifecycle {
-  #   ignore_changes = [
-  #     # task_definition,
-  #     # desired_count
-  #   ]
-  # }
+  lifecycle {
+    ignore_changes = [
+      task_definition,
+      # desired_count
+    ]
+  }
 
   depends_on = [
     aws_lb_listener.backend_listener,
@@ -1281,7 +1291,7 @@ resource "aws_ecs_service" "app" {
 
   lifecycle {
     ignore_changes = [
-      task_definition,
+      task_definition
       # desired_count
     ]
   }
