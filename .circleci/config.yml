@@ -66,7 +66,7 @@ jobs:
                   SHOULD_BUILD="<< pipeline.parameters.build_backend >>"
                   SHOULD_GET="<< pipeline.parameters.get_backend >>"
                   ;;
-                seed-database)
+                database-seeder)
                   SHOULD_BUILD="<< pipeline.parameters.run_seeding >>"
                   ;;
               esac
@@ -113,7 +113,7 @@ jobs:
 
             # Note: Handle the seeder's specific Dockerfile name
             DOCKERFILE="Dockerfile"
-            if [ "$COMPONENT" == "seed-database" ]; then DOCKERFILE="db.Dockerfile"; fi
+            if [ "$COMPONENT" == "database-seeder" ]; then DOCKERFILE="db.Dockerfile"; fi
 
             if [ "$SHOULD_BUILD" == "true" ]; then
               docker build -f $DOCKERFILE -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
