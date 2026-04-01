@@ -84,7 +84,7 @@ default:
         DOCKERFILE: Dockerfile
       - SERVICE: "seed_database"
         BUILD_DIR: "lirw-three-tier/database-seeder"
-        ECR_REPOSITORY: "lirw-ecr-database-seed-repo-$ENV_VAR"
+        ECR_REPOSITORY: "lirw-ecr-database-seeder-repo-$ENV_VAR"
         TASK_FAMILY: "db-seeder-$ENV_VAR"
         BUILD_NAME: "SEED_DATABASE"
         GET_NAME: "GET_SEED_IMAGE"

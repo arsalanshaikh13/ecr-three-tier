@@ -1175,12 +1175,12 @@ resource "aws_ecs_service" "backend" {
   deployment_minimum_healthy_percent = 100 
   deployment_maximum_percent         = 200
 
-  # lifecycle {
-  #   ignore_changes = [
-  #     task_definition,
-  #     # desired_count
-  #   ]
-  # }
+  lifecycle {
+    ignore_changes = [
+      task_definition,
+      # desired_count
+    ]
+  }
 
   depends_on = [
     aws_lb_listener.backend_listener,
@@ -1297,12 +1297,12 @@ resource "aws_ecs_service" "app" {
   deployment_minimum_healthy_percent = 100 
   deployment_maximum_percent         = 200
 
-  # lifecycle {
-  #   ignore_changes = [
-  #     task_definition
-  #     # desired_count
-  #   ]
-  # }
+  lifecycle {
+    ignore_changes = [
+      task_definition
+      # desired_count
+    ]
+  }
 
   depends_on = [
     aws_lb_listener.app_listener_https_secure,
