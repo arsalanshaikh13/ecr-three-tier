@@ -103,6 +103,7 @@ gh api --method POST "repos/$REPO/environments/production/deployment-branch-poli
 gh api --method POST "repos/$REPO/environments/production/deployment-branch-policies" -f name='v*' -f type='tag'
 
 
+REPO_NAME=$1
 
 # 4. Initialize Local Git
 git init
@@ -152,6 +153,18 @@ glab api --method POST projects/owner%2Frepo/environments -f name="production"
 glab api --method POST projects/owner%2Frepo/protected_environments \
   -f name="production" \
   -f deploy_access_levels='[{"access_level": 40}]'
+
+# GitLab allows certain roles to override variables when running a pipeline manually.
+#  You can set this to owner, maintainer, developer, 
+# or no_one_allowed (represented by null or specific strings in the API).
+glab api --method PUT projects/owner%2Frepo \
+  -f ci_pipeline_variables_minimum_override_role="maintainer"
+
+# If you want to ensure that only the roles defined above can use variables in the pipeline,
+#  you may want to toggle the restriction setting:
+# Enable the restriction so only the minimum role can use pipeline variables
+glab api --method PUT projects/owner%2Frepo \
+  -f restrict_user_defined_variables=true
 
 # Delete an environment
 glab api --method DELETE projects/owner%2Frepo/environments/production
