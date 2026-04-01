@@ -94,7 +94,7 @@ jobs:
           docker_layer_caching: true
 
       - aws-cli/setup:
-          role_arn: "arn:aws:iam::${ACCOUNT_ID}:role/CircleCI-ECS-DeployRole"
+          role_arn: "arn:aws:iam::${ACCOUNT_ID}:role/CircleCIActions-ECS-DeployRole"
 
       # 2. The Unified Build & Push (Identical for all 3)
       - run:
