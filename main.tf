@@ -511,7 +511,7 @@ resource "aws_security_group" "ecs_node_backend_sg" {
     from_port       = 32768
     to_port         = 65535
     protocol        = "tcp"
-    security_groups = [aws_security_group.alb_sg.id]
+    security_groups = [aws_security_group.internal_alb_sg.id]
   }
 
   # # 3. NEW: The Hairpin Fix (Self-Referencing)
@@ -965,8 +965,8 @@ resource "aws_ecs_task_definition" "backend" {
       essential = true
       
       # Resource limits moved to the container level to prevent host OOM issues
-      memory    = var.app_cpu 
-      cpu       = var.app_memory
+      memory    = var.app_memory
+      cpu       = var.app_cpu
       
       portMappings = [
         {
@@ -1014,12 +1014,12 @@ resource "aws_ecs_task_definition" "backend" {
       }
     }
   ])
-    lifecycle {
-    ignore_changes = [
-      container_definitions,
-      # desired_count
-    ]
-  }
+  #   lifecycle {
+  #   ignore_changes = [
+  #     container_definitions,
+  #     # desired_count
+  #   ]
+  # }
 
 }
 
