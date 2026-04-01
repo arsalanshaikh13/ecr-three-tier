@@ -89,13 +89,13 @@ jobs:
             # Export for downstream steps
             echo "export SHOULD_BUILD=$SHOULD_BUILD" >> $BASH_ENV
             echo "export SHOULD_GET=$SHOULD_GET" >> $BASH_ENV
-            echo "$ACCOUNT_ID Account id "
+            echo "${ACCOUNT_ID} Account id "
       - setup_remote_docker:
           docker_layer_caching: true
 
       - aws-cli/setup:
-          role_arn: "arn:aws:iam::${ACCOUNT_ID}:role/CircleCIActions-ECS-DeployRole"
-          region: ${AWS_REGION}
+          role_arn: "arn:aws:iam::$ACCOUNT_ID:role/CircleCIActions-ECS-DeployRole"
+          region: $AWS_REGION
           profile_name: default
 
       # 2. The Unified Build & Push (Identical for all 3)
