@@ -132,7 +132,7 @@ jobs:
           command: |
             COMPONENT="<< parameters.component >>"
 
-            if [ "$COMPONENT" == "seed-database" ]; then
+            if [ "$COMPONENT" == "database-seeder" ]; then
               TASK_FAMILY="db-seeder-$ENV_VAR"
             else
               TASK_FAMILY="lirw-ecr-${COMPONENT}"
@@ -151,7 +151,7 @@ jobs:
             COMPONENT="<< parameters.component >>"
             ECS_CLUSTER="ecs-cluster-$ENV_VAR"
 
-            if [ "$COMPONENT" == "seed-database" ]; then
+            if [ "$COMPONENT" == "database-seeder" ]; then
               echo "🚀 Running Database Seeder Task..."
               TASK_ARN=$(aws ecs run-task --cluster $ECS_CLUSTER --task-definition $NEW_TASK_ARN --launch-type EC2 --query "tasks[0].taskArn" --output text)
               
@@ -188,4 +188,4 @@ workflows:
                 - circleci-public
           matrix:
             parameters:
-              component: ["frontend", "backend", "seed-database"]
+              component: ["frontend", "backend", "database-seeder"]
