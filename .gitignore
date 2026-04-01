@@ -7,5 +7,6 @@ task-defini*.json
 *.pem
 cluster.sh
 lirw-ecr/**
-.env_gitlab
+.env_*
 .github/workflows/**
+.gitlab*
